@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WiFi Configuration - $(hostname)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: #f5f5f5;
+        }
+        .container { 
+            max-width: 500px; 
+            margin: 0 auto; 
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; text-align: center; margin-bottom: 30px; }
+        .network-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .network-section h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .force-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #fff3cd;
+            border-radius: 5px;
+            border-left: 4px solid #ffc107;
+        }
+        .force-section h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+        }
+        .checkbox-container input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+        .checkbox-container label {
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+        input[type="text"], input[type="password"] { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 8px 0; 
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button { 
+            flex: 1;
+            padding: 12px; 
+            border: none; 
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn-save {
+            background: #28a745; 
+            color: white;
+        }
+        .btn-save:hover { background: #218838; }
+        .btn-restart {
+            background: #17a2b8;
+            color: white;
+        }
+        .btn-restart:hover { background: #138496; }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            color: #155724;
+        }
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        .warning {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WiFi Configuration</h1>
+        
+        <form id="configForm" action="/cgi-bin/wifi-config.cgi" method="post">
+            <div class="force-section">
+                <h3>⚠️ Force Hotspot Mode</h3>
+                <div class="checkbox-container">
+                    <input type="checkbox" id="force_hotspot" name="force_hotspot" value="true">
+                    <label for="force_hotspot">Keep hotspot active (disable WiFi connections)</label>
+                </div>
+                <div class="warning">
+                    <strong>Warning:</strong> When enabled, the device will ONLY run in hotspot mode and will not attempt to connect to any WiFi networks until this is unchecked.
+                </div>
+            </div>
+            
+            <div class="network-section">
+                <h3>Primary Network</h3>
+                <label for="main_ssid">Network Name (SSID):</label>
+                <input type="text" id="main_ssid" name="main_ssid" placeholder="Your main WiFi network">
+                
+                <label for="main_password">Password:</label>
+                <input type="password" id="main_password" name="main_password" placeholder="Main network password">
+            </div>
+            
+            <div class="network-section">
+                <h3>Backup Network (Optional)</h3>
+                <label for="backup_ssid">Network Name (SSID):</label>
+                <input type="text" id="backup_ssid" name="backup_ssid" placeholder="Your backup WiFi network">
+                
+                <label for="backup_password">Password:</label>
+                <input type="password" id="backup_password" name="backup_password" placeholder="Backup network password">
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" class="btn-save" name="action" value="save">Save Configuration</button>
+                <button type="submit" class="btn-restart" name="action" value="restart">Save & Restart Service</button>
+            </div>
+        </form>
+        
+        <div class="info">
+            <strong>How it works:</strong>
+            <ul>
+                <li><strong>Save Configuration:</strong> Saves settings without restarting (changes apply gradually)</li>
+                <li><strong>Save & Restart Service:</strong> Immediate restart to test new settings</li>
+                <li><strong>Force Hotspot:</strong> Keeps hotspot active regardless of network availability</li>
+                <li>Without force mode: Primary network (4 attempts) → Backup network (4 attempts) → Hotspot</li>
+                <li>Device automatically switches back when networks become available</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Make SSID required only if force hotspot is not checked
+        const forceCheckbox = document.getElementById('force_hotspot');
+        const mainSsid = document.getElementById('main_ssid');
+        
+        function updateRequirements() {
+            if (forceCheckbox.checked) {
+                mainSsid.removeAttribute('required');
+            } else {
+                mainSsid.setAttribute('required', 'required');
+            }
+        }
+        
+        forceCheckbox.addEventListener('change', updateRequirements);
+        updateRequirements(); // Run on page load
+    </script>
+</body>
+</html>
