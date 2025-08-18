@@ -13,6 +13,7 @@
 
  ```bash ```bash
  git clone https://github.com/darkdrago74/rpi-wifi-fallback.git
+ 
  cd rpi-wifi-fallback && ./install.sh
 
 
