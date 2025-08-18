@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # RPi WiFi Fallback Hotspot - Automatic Installer
-# Author: Your Name
+# Author: darkdrago74
 # GitHub: https://github.com/darkdrago74/rpi-wifi-fallback
 
 set -e  # Exit on any error
