@@ -194,3 +194,6 @@ while true; do
     
     sleep $CHECK_INTERVAL
 done
+    
+    sleep $CHECK_INTERVAL
+done
