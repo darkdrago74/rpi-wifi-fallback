@@ -124,6 +124,9 @@ sudo chmod +x /usr/local/bin/hotspot-control
 if ! grep -q "alias hotspot=" /etc/bash.bashrc; then
     echo 'alias hotspot="sudo hotspot-control"' | sudo tee -a /etc/bash.bashrc
 fi
+log "Manual hotspot control installed!"
+log "Usage: hotspot on/off/status"
+
 
 log "================================================"
 log "✅ Installation completed successfully!"
