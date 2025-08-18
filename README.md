@@ -20,6 +20,7 @@ cd rpi-wifi-fallback && ./install.sh
 
 Alternative One-Liner Install
 curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | bash
+
 🔧 Configuration
 Automatic Setup
 
