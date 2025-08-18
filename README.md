@@ -16,6 +16,10 @@
  
  cd rpi-wifi-fallback && ./install.sh
 
+ OR
+
+ curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh |  bash
+
 
 
 
