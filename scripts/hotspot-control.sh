@@ -1,5 +1,3 @@
-# Create manual hotspot control script
-sudo tee /usr/local/bin/hotspot-control > /dev/null <<EOF
 #!/bin/bash
 
 CONFIG_FILE="/etc/wifi-fallback.conf"
@@ -67,10 +65,3 @@ case "$1" in
         echo "• Klipper/Mainsail: http://192.168.66.66"
         ;;
 esac
-EOF
-
-# Make it executable
-sudo chmod +x /usr/local/bin/hotspot-control
-
-# Create a convenient alias
-echo 'alias hotspot="sudo hotspot-control"' | sudo tee -a /etc/bash.bashrc
