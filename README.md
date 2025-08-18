@@ -15,10 +15,10 @@
 ## 🚀 Quick Installation
 
 ```bash
-git clone https://github.com/yourusername/rpi-wifi-fallback.git
+git clone https://github.com/darkdrago74/rpi-wifi-fallback.git
 cd rpi-wifi-fallback && ./install.sh
 Alternative One-Liner Install
-bashcurl -fsSL https://raw.githubusercontent.com/yourusername/rpi-wifi-fallback/main/install.sh | bash
+bashcurl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | bash
 🔧 Configuration
 Automatic Setup
 
