@@ -85,6 +85,18 @@ sudo cp web/index.html /var/www/html/
 sudo cp web/wifi-config.cgi /usr/lib/cgi-bin/
 sudo chmod +x /usr/lib/cgi-bin/wifi-config.cgi
 
+# Install hotspot control script
+log "Installing hotspot control commands..."
+sudo cp scripts/hotspot-control.sh /usr/local/bin/hotspot-control
+sudo chmod +x /usr/local/bin/hotspot-control
+
+# Create convenient alias
+if ! grep -q "alias hotspot=" /etc/bash.bashrc; then
+    echo 'alias hotspot="sudo hotspot-control"' | sudo tee -a /etc/bash.bashrc
+fi
+log "Manual hotspot control installed!"
+log "Usage: hotspot on/off/status"
+
 # Configure lighttpd for CGI
 log "Configuring web server..."
 sudo sed -i 's/#.*"mod_cgi"/        "mod_cgi",/' /etc/lighttpd/lighttpd.conf
@@ -114,19 +126,6 @@ fi
 
 # Get hostname for hotspot name
 HOSTNAME=$(hostname)
-
-# Install hotspot control script
-log "Installing hotspot control commands..."
-sudo cp scripts/hotspot-control.sh /usr/local/bin/hotspot-control
-sudo chmod +x /usr/local/bin/hotspot-control
-
-# Create convenient alias
-if ! grep -q "alias hotspot=" /etc/bash.bashrc; then
-    echo 'alias hotspot="sudo hotspot-control"' | sudo tee -a /etc/bash.bashrc
-fi
-log "Manual hotspot control installed!"
-log "Usage: hotspot on/off/status"
-
 
 log "================================================"
 log "✅ Installation completed successfully!"
