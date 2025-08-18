@@ -17,11 +17,15 @@
 ```bash
 git clone https://github.com/darkdrago74/rpi-wifi-fallback.git
 cd rpi-wifi-fallback && ./install.sh
+```
 
-Alternative One-Liner Install
+### Alternative One-Liner Install
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | bash
+```
 
-🔧 Configuration
+## 🔧 Configuration
 Automatic Setup
 
 Connect via Ethernet for initial setup, or
