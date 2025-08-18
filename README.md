@@ -1,5 +1,6 @@
 # Raspberry Pi WiFi Fallback Hotspot Raspberry Pi WiFi Fallback Hotspot
- Automatic WiFi fallback system that creates a hotspot when your configured networks are unavailable. Automatic WiFi fallback system that creates a hotspot when your configured networks are unavailable.
+ Automatic WiFi fallback system that creates a hotspot when your configured networks are unavailable.
+ 
  Possibility to manually enforce the hotspot mode on the IP address 192.168.66.66:8080 through the command hotspot on
  #### 
 
@@ -81,3 +82,33 @@ raspberry
  Documentation
  
  See manual installation guide for step-by-step setup.
+ 
+Notes
+
+•	The script tries main network first (4 attempts, 30s each)
+
+•	Then tries backup network (4 attempts, 30s each)
+
+•	Hotspot activates only after both networks fail completely
+
+•	Automatically switches back to WiFi when any network becomes available
+
+•	Web configurator replaces existing WiFi settings - it doesn't add to them
+
+•	Lightweight: ~5MB RAM usage
+
+•	Logs all activity for troubleshooting
+
+
+Customization
+
+Edit /usr/local/bin/wifi-fallback.sh to modify:
+
+•	HOTSPOT_SSID: Hotspot name
+
+•	HOTSPOT_PASSWORD: Hotspot password
+
+•	CHECK_INTERVAL: How often to check connection (seconds)
+
+•	MAX_RETRIES: Failed attempts per network before trying next (4 = 2 minutes per network)
+
