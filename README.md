@@ -6,7 +6,9 @@
 
  Quick Install
  ```bash ```bash
+ 
  git clone https://github.com/darkdrago74/rpi-wifi-fallback.git git clone https://github.com/darkdrago74/rpi-wifi-fallback.git
+ 
  cd rpi-wifi-fallback && ./install.sh
 
 
@@ -29,6 +31,7 @@
  
  ⚡
  Lightweight (~5MB RAM usage)
+
  
  📋
  Requirements :
@@ -38,19 +41,21 @@
  Raspberry Pi OS (Debian-based)
  
  Internet connection for installation
+
  
  🔧
  Configuration
  After installation, configure via:
  
  Web interface: 
- http://192.168.66.66 (when in hotspot mode)
+ http://192.168.66.66:8080 (when in hotspot mode)
  
  Hotspot name: 
 [hostname]-hotspot
 
  Hotspot password: 
 raspberry
+
 
  🎯
  Perfect For
