@@ -115,6 +115,16 @@ fi
 # Get hostname for hotspot name
 HOSTNAME=$(hostname)
 
+# Install hotspot control script
+log "Installing hotspot control commands..."
+sudo cp scripts/hotspot-control.sh /usr/local/bin/hotspot-control
+sudo chmod +x /usr/local/bin/hotspot-control
+
+# Create convenient alias
+if ! grep -q "alias hotspot=" /etc/bash.bashrc; then
+    echo 'alias hotspot="sudo hotspot-control"' | sudo tee -a /etc/bash.bashrc
+fi
+
 log "================================================"
 log "✅ Installation completed successfully!"
 log ""
