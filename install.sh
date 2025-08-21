@@ -65,10 +65,10 @@ fi
 log "Starting RPi WiFi Fallback Installation..."
 log "================================================"
 
-# Update system
-log "Updating system packages..."
-sudo apt update -y
-sudo apt upgrade -y
+# Update system - assuming users do it by default
+#log "Updating system packages..."
+#sudo apt update -y
+#sudo apt upgrade -y
 
 # Install required packages
 log "Installing required packages..."
