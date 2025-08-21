@@ -47,6 +47,27 @@ hotspot status
 # Disable manual hotspot (return to WiFi)
 hotspot off
 
+
+🛡️ Safety & Maintenance
+
+### Check Installation Status
+```bash
+./check.sh
+```
+Reset System (if having issues)
+```bash
+bash./reset.sh  # Resets to defaults without uninstalling
+```
+Complete Uninstall
+```bash
+bash./uninstall.sh  # Removes everything, restores original state
+```
+Create Backup Before Installing
+```bash
+bash./backup.sh    # Creates backup of original configs
+./install.sh   # Then install normally
+```
+
 🖨️ 3D Printer Integration
 When in hotspot mode, you get dual access:
 
