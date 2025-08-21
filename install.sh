@@ -67,8 +67,7 @@ log "================================================"
 
 # Update system - assuming users do it by default
 #log "Updating system packages..."
-#sudo apt update -y
-#sudo apt upgrade -y
+sudo apt update
 
 # Install required packages
 log "Installing required packages..."
