@@ -6,7 +6,7 @@ HOTSPOT_SSID="$(hostname)-hotspot"
 HOTSPOT_PASSWORD="raspberry"
 HOTSPOT_IP="192.168.66.66"
 WEB_PORT="8080"  # Web configurator port to avoid conflicts
-CHECK_INTERVAL=30
+CHECK_INTERVAL=60
 MAX_RETRIES=4
 MAIN_SSID=""
 MAIN_PASSWORD=""
@@ -30,10 +30,10 @@ log_message() {
 }
 
 is_wifi_connected() {
+    # Check if connected to WiFi
     if iwgetid "$WIFI_INTERFACE" >/dev/null 2>&1; then
-        # Check if we can reach the gateway
-        gateway=$(ip route | grep default | grep "$WIFI_INTERFACE" | awk '{print $3}' | head -n1)
-        if [ -n "$gateway" ] && ping -c 1 -W 2 "$gateway" >/dev/null 2>&1; then
+        # Check if we have an IP address
+        if ip addr show "$WIFI_INTERFACE" | grep -q "inet "; then
             return 0
         fi
     fi
