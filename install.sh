@@ -13,16 +13,6 @@ if [[ ! -x "$0" ]]; then
     exec "$0" "$@"
 fi
 
-# Check Debian/Raspberry Pi OS version
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [[ "$VERSION_CODENAME" == "bookworm" ]] || [[ "$VERSION_CODENAME" == "bullseye" ]] || [[ "$VERSION_CODENAME" == "buster" ]]; then
-        log "✅ Detected compatible OS: $PRETTY_NAME"
-    else
-        warning "Untested OS version: $PRETTY_NAME - continuing anyway"
-    fi
-fi
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -47,6 +37,16 @@ warning() {
 info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
+
+# Check Debian/Raspberry Pi OS version
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$VERSION_CODENAME" == "bookworm" ]] || [[ "$VERSION_CODENAME" == "bullseye" ]] || [[ "$VERSION_CODENAME" == "buster" ]]; then
+        log "✅ Detected compatible OS: $PRETTY_NAME"
+    else
+        warning "Untested OS version: $PRETTY_NAME - continuing anyway"
+    fi
+fi
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
