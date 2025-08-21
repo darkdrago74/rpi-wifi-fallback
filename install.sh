@@ -6,6 +6,13 @@
 
 set -e  # Exit on any error
 
+# Auto-fix permissions if needed
+if [[ ! -x "$0" ]]; then
+    echo "Making install script executable..."
+    chmod +x "$0"
+    exec "$0" "$@"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
