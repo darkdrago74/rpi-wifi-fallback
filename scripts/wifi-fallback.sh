@@ -126,7 +126,7 @@ start_hotspot() {
     fi
 
     # Check if hotspot is broadcasting
-    if ! sudo iwlist wlan0 scan | grep -q "LinuxforRoro-hotspot"; then
+    if ! sudo iwlist wlan0 scan | grep -q "$(hostname)-hotspot"; then
         log_message "WARNING: Hotspot may not be broadcasting properly"
     fi
     log_message "Hotspot services started successfully"
