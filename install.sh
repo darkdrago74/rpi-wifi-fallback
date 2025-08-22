@@ -92,8 +92,19 @@ sudo chmod +x /usr/local/bin/wifi-fallback.sh
 # Install configuration files
 log "Installing configuration files..."
 sudo cp config/hostapd.conf /etc/hostapd/
-sudo cp config/dnsmasq.conf /etc/dnsmasq.conf
 sudo cp config/wifi-fallback.service /etc/systemd/system/
+
+# Create dnsmasq configuration (don't copy, create directly)
+log "Creating dnsmasq configuration..."
+sudo tee /etc/dnsmasq.conf > /dev/null <<EOF
+interface=wlan0
+dhcp-range=192.168.66.2,192.168.66.20,255.255.255.0,24h
+domain=local
+address=/gw.local/192.168.66.66
+address=/printer.local/192.168.66.66
+address=/mainsail.local/192.168.66.66
+address=/fluidd.local/192.168.66.66
+EOF
 
 # Install web interface
 log "Installing web interface..."
@@ -119,6 +130,12 @@ sudo sed -i 's/#.*"mod_cgi"/        "mod_cgi",/' /etc/lighttpd/lighttpd.conf
 if ! grep -q "cgi.assign" /etc/lighttpd/lighttpd.conf; then
     echo 'cgi.assign = ( ".cgi" => "" )' | sudo tee -a /etc/lighttpd/lighttpd.conf
 fi
+
+# Unmask and configure hostapd (Raspberry Pi OS masks it by default)
+log "Configuring hostapd service..."
+sudo systemctl unmask hostapd 2>/dev/null || true
+sudo systemctl stop hostapd dnsmasq 2>/dev/null || true
+sudo systemctl disable hostapd dnsmasq 2>/dev/null || true
 
 # Enable and start services
 log "Enabling services..."
