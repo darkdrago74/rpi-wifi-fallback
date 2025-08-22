@@ -50,7 +50,17 @@ hotspot off
 
 🛡️ Safety & Maintenance
 
-### Check Installation Status
+### 
+Make the troubleshooting files executable
+```bash
+cd rpi-wifi-fallback/
+chmod +x reset.sh
+chmod +x check.sh
+chmod +x backup.sh
+chmod +x uninstall.sh
+```
+
+Check Installation Status
 ```bash
 ./check.sh
 ```
