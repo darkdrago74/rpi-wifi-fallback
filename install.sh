@@ -106,6 +106,26 @@ address=/mainsail.local/192.168.66.66
 address=/fluidd.local/192.168.66.66
 EOF
 
+# Create hostapd configuration dynamically
+log "Creating hostapd configuration..."
+HOSTNAME=$(hostname)
+sudo tee /etc/hostapd/hostapd.conf > /dev/null <<EOF
+interface=wlan0
+driver=nl80211
+ssid=${HOSTNAME}-hotspot
+hw_mode=g
+channel=7
+wmm_enabled=0
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=raspberry
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+EOF
+
 # Install web interface
 log "Installing web interface..."
 sudo cp web/index.html /var/www/html/
