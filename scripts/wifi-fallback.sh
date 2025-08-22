@@ -6,8 +6,8 @@ HOTSPOT_SSID="$(hostname)-hotspot"
 HOTSPOT_PASSWORD="raspberry"
 HOTSPOT_IP="192.168.66.66"
 WEB_PORT="8080"  # Web configurator port to avoid conflicts
-CHECK_INTERVAL=60
-MAX_RETRIES=4
+CHECK_INTERVAL=300
+MAX_RETRIES=2
 MAIN_SSID=""
 MAIN_PASSWORD=""
 BACKUP_SSID=""
@@ -30,10 +30,10 @@ log_message() {
 }
 
 is_wifi_connected() {
-    # Check if connected to WiFi
-    if iwgetid "$WIFI_INTERFACE" >/dev/null 2>&1; then
-        # Check if we have an IP address
-        if ip addr show "$WIFI_INTERFACE" | grep -q "inet "; then
+    # Check wpa_supplicant state first
+    if wpa_cli -i "$WIFI_INTERFACE" status | grep -q "wpa_state=COMPLETED"; then
+        # Verify we have IP address
+        if ip addr show "$WIFI_INTERFACE" | grep -q "inet .*scope global"; then
             return 0
         fi
     fi
@@ -86,38 +86,50 @@ EOF
 }
 
 start_hotspot() {
-    log_message "Starting hotspot mode"
+    log_message "Starting hotspot mode - forcing interface control"
     
-    # FORCE disconnect from current WiFi
-    sudo systemctl stop wpa_supplicant 2>/dev/null || true
-    sudo killall wpa_supplicant 2>/dev/null || true
-    sudo killall dhclient 2>/dev/null || true
-    sudo killall dhcpcd 2>/dev/null || true
+    # Nuclear option - stop ALL network management
+    sudo systemctl stop wpa_supplicant@wlan0 2>/dev/null || true
+    sudo systemctl stop wpa_supplicant 2>/dev/null || true  
+    sudo systemctl stop dhcpcd 2>/dev/null || true
+    sudo killall -9 wpa_supplicant dhclient dhcpcd 2>/dev/null || true
     
-    # Flush all IP addresses and reset interface
-    sudo ip addr flush dev "$WIFI_INTERFACE"
-    sudo ip link set "$WIFI_INTERFACE" down
+    # Wait for processes to die
+    sleep 3
+    
+    # Completely reset interface
+    sudo ip link set wlan0 down
+    sudo ip addr flush dev wlan0
+    sudo ip link set wlan0 up
     sleep 2
-    sudo ip link set "$WIFI_INTERFACE" up
-    sleep 2
     
-    # Configure static IP
-    sudo ip addr add "$HOTSPOT_IP/24" dev "$WIFI_INTERFACE"
+    # Set static IP for hotspot
+    sudo ip addr add 192.168.66.66/24 dev wlan0
     
-    # Start hostapd and dnsmasq
+    # Now try to start hostapd
     sudo systemctl start hostapd
+    if ! sudo systemctl is-active hostapd; then
+        log_message "ERROR: hostapd failed to start"
+        return 1
+    fi
+    
     sudo systemctl start dnsmasq
-    
-    # Enable IP forwarding (optional, for internet sharing via eth0)
-    echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
-    
-    # Configure lighttpd to run on specific port to avoid conflicts
-    sudo sed -i "s/server.port.*=.*/server.port = $WEB_PORT/" /etc/lighttpd/lighttpd.conf
-    sudo systemctl restart lighttpd
-    
-    log_message "Hotspot started: $HOTSPOT_SSID"
-    log_message "WiFi Config available at: http://$HOTSPOT_IP:$WEB_PORT"
-    log_message "Klipper/Mainsail available at: http://$HOTSPOT_IP (port 80)"
+    if ! sudo systemctl is-active dnsmasq; then
+        log_message "ERROR: dnsmasq failed to start"  
+        return 1
+    fi
+    # After starting services, verify they're actually working
+    sleep 5
+    if iwgetid wlan0 2>/dev/null; then
+        log_message "ERROR: Still in client mode, hotspot failed"
+        return 1
+    fi
+
+    # Check if hotspot is broadcasting
+    if ! sudo iwlist wlan0 scan | grep -q "LinuxforRoro-hotspot"; then
+        log_message "WARNING: Hotspot may not be broadcasting properly"
+    fi
+    log_message "Hotspot services started successfully"
 }
 
 stop_hotspot() {
