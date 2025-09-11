@@ -88,39 +88,70 @@ EOF
 start_hotspot() {
     log_message "Starting hotspot mode - forcing interface control"
     
-    # SOLUTION 1: Complete interface cleanup before hotspot
+    # ENHANCED interface cleanup
     log_message "Cleaning up WiFi client mode before hotspot"
     
-    # Stop ALL WiFi client services
+    # Stop ALL WiFi client services more aggressively
     sudo systemctl stop wpa_supplicant@wlan0 2>/dev/null || true
     sudo systemctl stop wpa_supplicant 2>/dev/null || true  
     sudo systemctl stop dhcpcd 2>/dev/null || true
-    sudo killall -9 wpa_supplicant dhclient dhcpcd wpa_cli 2>/dev/null || true
+    sudo systemctl stop NetworkManager 2>/dev/null || true
     
-    # Wait for processes to fully terminate
-    sleep 3
+    # Kill all processes that might be using wlan0
+    sudo killall -9 wpa_supplicant dhclient dhcpcd wpa_cli NetworkManager 2>/dev/null || true
     
-    # Clean up interface completely
-    sudo ip addr flush dev $WIFI_INTERFACE
+    # Wait longer for processes to fully terminate
+    sleep 5
+    
+    # Force remove any remaining wpa_supplicant sockets
+    sudo rm -rf /var/run/wpa_supplicant/wlan0 2>/dev/null || true
+    
+    # Reset interface more thoroughly
+    sudo rfkill unblock wifi
     sudo ip link set $WIFI_INTERFACE down
-    sleep 2
+    sudo ip addr flush dev $WIFI_INTERFACE
+    
+    # Remove interface from any bridge
+    sudo ip link set $WIFI_INTERFACE nomaster 2>/dev/null || true
+    
+    # Wait and bring interface back up
+    sleep 3
     sudo ip link set $WIFI_INTERFACE up
+    sleep 2
     
     # Set static IP for hotspot
     sudo ip addr add 192.168.66.66/24 dev $WIFI_INTERFACE
     
     log_message "Interface cleaned and ready for hotspot"
     
-    # Now start hostapd with clean interface
+    # Start hostapd with explicit configuration
+    log_message "Starting hostapd with explicit config"
     sudo systemctl start hostapd
+    
+    # Wait and check if hostapd started properly
+    sleep 5
     if ! sudo systemctl is-active --quiet hostapd; then
-        log_message "ERROR: hostapd failed to start"
+        log_message "ERROR: hostapd failed to start, checking status"
+        sudo systemctl status hostapd --no-pager -l
         return 1
     fi
     
+    # Verify hostapd is actually controlling the interface
+    if iwgetid $WIFI_INTERFACE 2>/dev/null; then
+        log_message "ERROR: Interface still in client mode after hostapd start"
+        log_message "Attempting to restart hostapd with debug info"
+        sudo systemctl stop hostapd
+        sleep 2
+        sudo hostapd /etc/hostapd/hostapd.conf -B -d 2>&1 | head -10 | while read line; do
+            log_message "hostapd debug: $line"
+        done
+        return 1
+    fi
+    
+    # Start dnsmasq
     sudo systemctl start dnsmasq
     if ! sudo systemctl is-active --quiet dnsmasq; then
-        log_message "ERROR: dnsmasq failed to start"  
+        log_message "ERROR: dnsmasq failed to start"
         return 1
     fi
     
@@ -135,16 +166,21 @@ start_hotspot() {
         log_message "WARNING: iptables not available, NAT forwarding not configured"
     fi
     
-    # Verify hotspot is working properly after startup
+    # Final verification
     sleep 5
-    if iwgetid $WIFI_INTERFACE 2>/dev/null; then
-        log_message "ERROR: Still in client mode, hotspot failed"
+    
+    # Check if interface is properly configured
+    if ! ip addr show $WIFI_INTERFACE | grep -q "192.168.66.66"; then
+        log_message "ERROR: Hotspot IP not properly configured"
         return 1
     fi
-
+    
     # Check if hotspot is broadcasting
-    if ! sudo iwlist $WIFI_INTERFACE scan | grep -q "$(hostname)-hotspot" 2>/dev/null; then
-        log_message "WARNING: Hotspot may not be broadcasting properly"
+    sleep 10  # Give more time for hostapd to fully initialize
+    if sudo iwlist $WIFI_INTERFACE scan 2>/dev/null | grep -q "$(hostname)-hotspot"; then
+        log_message "✅ Hotspot is broadcasting and ready"
+    else
+        log_message "WARNING: Hotspot may not be broadcasting yet (still initializing)"
     fi
     
     log_message "Hotspot services started successfully"
