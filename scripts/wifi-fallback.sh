@@ -245,28 +245,34 @@ start_hotspot() {
 stop_hotspot() {
     log_message "Stopping hotspot mode"
     
-    # Stop services
+    # Stop hostapd and dnsmasq services
     sudo systemctl stop hostapd
     sudo systemctl stop dnsmasq
     
-    # Clean up iptables rules (if available)
+    # Clean up iptables rules (remove our hotspot rules)
     if command -v iptables >/dev/null 2>&1; then
+        log_message "Cleaning up NAT forwarding rules"
         sudo iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
         sudo iptables -D FORWARD -i $WIFI_INTERFACE -o eth0 -j ACCEPT 2>/dev/null || true
         sudo iptables -D FORWARD -i eth0 -o $WIFI_INTERFACE -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
     
-    # Remove static IP
+    # Remove hotspot IP and reset interface
     sudo ip addr flush dev "$WIFI_INTERFACE"
+    sudo ip link set "$WIFI_INTERFACE" down
+    sleep 2
+    sudo ip link set "$WIFI_INTERFACE" up
     
-    # Restart wpa_supplicant
+    # Unmask and restart WiFi client services
+    sudo systemctl unmask wpa_supplicant@wlan0 wpa_supplicant dhcpcd 2>/dev/null || true
     sudo systemctl start wpa_supplicant
+    sudo systemctl start dhcpcd
     
-    # Reset lighttpd to default port
+    # Reset lighttpd to port 80 for normal operation
     sudo sed -i "s/server.port.*=.*/server.port = 80/" /etc/lighttpd/lighttpd.conf
     sudo systemctl restart lighttpd
     
-    log_message "Hotspot stopped, attempting WiFi connection"
+    log_message "Hotspot stopped, attempting WiFi reconnection"
 }
 
 # Main loop
