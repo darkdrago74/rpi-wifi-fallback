@@ -88,48 +88,67 @@ EOF
 start_hotspot() {
     log_message "Starting hotspot mode - forcing interface control"
     
-    # Nuclear option - stop ALL network management
+    # SOLUTION 1: Complete interface cleanup before hotspot
+    log_message "Cleaning up WiFi client mode before hotspot"
+    
+    # Stop ALL WiFi client services
     sudo systemctl stop wpa_supplicant@wlan0 2>/dev/null || true
     sudo systemctl stop wpa_supplicant 2>/dev/null || true  
     sudo systemctl stop dhcpcd 2>/dev/null || true
-    sudo killall -9 wpa_supplicant dhclient dhcpcd 2>/dev/null || true
+    sudo killall -9 wpa_supplicant dhclient dhcpcd wpa_cli 2>/dev/null || true
     
-    # Wait for processes to die
+    # Wait for processes to fully terminate
     sleep 3
     
-    # Completely reset interface
-    sudo ip link set wlan0 down
-    sudo ip addr flush dev wlan0
-    sudo ip link set wlan0 up
+    # Clean up interface completely
+    sudo ip addr flush dev $WIFI_INTERFACE
+    sudo ip link set $WIFI_INTERFACE down
     sleep 2
+    sudo ip link set $WIFI_INTERFACE up
     
     # Set static IP for hotspot
-    sudo ip addr add 192.168.66.66/24 dev wlan0
+    sudo ip addr add 192.168.66.66/24 dev $WIFI_INTERFACE
     
-    # Now try to start hostapd
+    log_message "Interface cleaned and ready for hotspot"
+    
+    # Now start hostapd with clean interface
     sudo systemctl start hostapd
-    if ! sudo systemctl is-active hostapd; then
+    if ! sudo systemctl is-active --quiet hostapd; then
         log_message "ERROR: hostapd failed to start"
         return 1
     fi
     
     sudo systemctl start dnsmasq
-    if ! sudo systemctl is-active dnsmasq; then
+    if ! sudo systemctl is-active --quiet dnsmasq; then
         log_message "ERROR: dnsmasq failed to start"  
         return 1
     fi
-    # After starting services, verify they're actually working
+    
+    # Configure iptables for NAT forwarding (if available)
+    if command -v iptables >/dev/null 2>&1; then
+        log_message "Configuring NAT forwarding with iptables"
+        sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
+        sudo iptables -A FORWARD -i $WIFI_INTERFACE -o eth0 -j ACCEPT 2>/dev/null || true
+        sudo iptables -A FORWARD -i eth0 -o $WIFI_INTERFACE -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+        echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
+    else
+        log_message "WARNING: iptables not available, NAT forwarding not configured"
+    fi
+    
+    # Verify hotspot is working properly after startup
     sleep 5
-    if iwgetid wlan0 2>/dev/null; then
+    if iwgetid $WIFI_INTERFACE 2>/dev/null; then
         log_message "ERROR: Still in client mode, hotspot failed"
         return 1
     fi
 
     # Check if hotspot is broadcasting
-    if ! sudo iwlist wlan0 scan | grep -q "$(hostname)-hotspot"; then
+    if ! sudo iwlist $WIFI_INTERFACE scan | grep -q "$(hostname)-hotspot" 2>/dev/null; then
         log_message "WARNING: Hotspot may not be broadcasting properly"
     fi
+    
     log_message "Hotspot services started successfully"
+    return 0
 }
 
 stop_hotspot() {
@@ -138,6 +157,13 @@ stop_hotspot() {
     # Stop services
     sudo systemctl stop hostapd
     sudo systemctl stop dnsmasq
+    
+    # Clean up iptables rules (if available)
+    if command -v iptables >/dev/null 2>&1; then
+        sudo iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
+        sudo iptables -D FORWARD -i $WIFI_INTERFACE -o eth0 -j ACCEPT 2>/dev/null || true
+        sudo iptables -D FORWARD -i eth0 -o $WIFI_INTERFACE -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+    fi
     
     # Remove static IP
     sudo ip addr flush dev "$WIFI_INTERFACE"
@@ -163,8 +189,9 @@ while true; do
     if [ "$FORCE_HOTSPOT" = "true" ]; then
         if [ "$hotspot_active" = false ]; then
             log_message "Hotspot mode is FORCED - starting hotspot"
-            start_hotspot
-            hotspot_active=true
+            if start_hotspot; then
+                hotspot_active=true
+            fi
         fi
         sleep $CHECK_INTERVAL
         # Reload config to check if force mode was disabled
@@ -206,15 +233,13 @@ while true; do
         # Both failed, start hotspot
         elif [ "$hotspot_active" = false ]; then
             log_message "Both networks failed after $MAX_RETRIES attempts each. Starting hotspot."
-            start_hotspot
-            hotspot_active=true
+            if start_hotspot; then
+                hotspot_active=true
+            fi
             main_retry_count=0
             backup_retry_count=0
         fi
     fi
-    
-    sleep $CHECK_INTERVAL
-done
     
     sleep $CHECK_INTERVAL
 done
