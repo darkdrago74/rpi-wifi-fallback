@@ -88,70 +88,103 @@ EOF
 start_hotspot() {
     log_message "Starting hotspot mode - forcing interface control"
     
-    # ENHANCED interface cleanup
+    # ENHANCED interface cleanup with better process management
     log_message "Cleaning up WiFi client mode before hotspot"
     
-    # Stop ALL WiFi client services more aggressively
+    # Disable auto-restart of conflicting services temporarily
+    sudo systemctl mask wpa_supplicant@wlan0 2>/dev/null || true
+    sudo systemctl mask wpa_supplicant 2>/dev/null || true
+    sudo systemctl mask dhcpcd 2>/dev/null || true
+    
+    # Stop ALL WiFi client services more thoroughly
     sudo systemctl stop wpa_supplicant@wlan0 2>/dev/null || true
     sudo systemctl stop wpa_supplicant 2>/dev/null || true  
     sudo systemctl stop dhcpcd 2>/dev/null || true
     sudo systemctl stop NetworkManager 2>/dev/null || true
     
-    # Kill all processes that might be using wlan0
-    sudo killall -9 wpa_supplicant dhclient dhcpcd wpa_cli NetworkManager 2>/dev/null || true
+    # Kill processes multiple times to ensure they're really dead
+    for i in {1..3}; do
+        sudo killall -9 wpa_supplicant dhclient dhcpcd wpa_cli NetworkManager 2>/dev/null || true
+        sleep 1
+    done
     
-    # Wait longer for processes to fully terminate
-    sleep 5
-    
-    # Force remove any remaining wpa_supplicant sockets
+    # Remove any wpa_supplicant control sockets
     sudo rm -rf /var/run/wpa_supplicant/wlan0 2>/dev/null || true
+    sudo rm -rf /tmp/wpa_ctrl_* 2>/dev/null || true
     
-    # Reset interface more thoroughly
+    # Reset WiFi completely
+    log_message "Resetting WiFi interface completely"
+    sudo rfkill block wifi
+    sleep 2
     sudo rfkill unblock wifi
+    sleep 2
+    
+    # Reset interface thoroughly
     sudo ip link set $WIFI_INTERFACE down
     sudo ip addr flush dev $WIFI_INTERFACE
     
-    # Remove interface from any bridge
+    # Remove interface from any bridge or master
     sudo ip link set $WIFI_INTERFACE nomaster 2>/dev/null || true
     
-    # Wait and bring interface back up
-    sleep 3
+    # Wait longer for interface to be truly free
+    sleep 5
+    
+    # Bring interface back up
     sudo ip link set $WIFI_INTERFACE up
-    sleep 2
+    sleep 3
     
     # Set static IP for hotspot
     sudo ip addr add 192.168.66.66/24 dev $WIFI_INTERFACE
     
     log_message "Interface cleaned and ready for hotspot"
     
-    # Start hostapd with explicit configuration
-    log_message "Starting hostapd with explicit config"
+    # Start hostapd with better error checking
+    log_message "Starting hostapd with enhanced monitoring"
+    
+    # Try starting hostapd
     sudo systemctl start hostapd
     
-    # Wait and check if hostapd started properly
-    sleep 5
+    # Wait and verify it started
+    sleep 8
     if ! sudo systemctl is-active --quiet hostapd; then
-        log_message "ERROR: hostapd failed to start, checking status"
-        sudo systemctl status hostapd --no-pager -l
+        log_message "ERROR: hostapd failed to start, checking logs"
+        sudo journalctl -u hostapd --no-pager -l | tail -10 | while read line; do
+            log_message "hostapd: $line"
+        done
+        
+        # Try manual start for debugging
+        log_message "Attempting manual hostapd start"
+        sudo hostapd /etc/hostapd/hostapd.conf -B 2>&1 | while read line; do
+            log_message "hostapd manual: $line"
+        done
+        
+        # Unmask services before returning
+        sudo systemctl unmask wpa_supplicant@wlan0 wpa_supplicant dhcpcd 2>/dev/null || true
         return 1
     fi
     
-    # Verify hostapd is actually controlling the interface
+    # Additional verification - check if interface is in AP mode
+    sleep 5
     if iwgetid $WIFI_INTERFACE 2>/dev/null; then
         log_message "ERROR: Interface still in client mode after hostapd start"
-        log_message "Attempting to restart hostapd with debug info"
+        log_message "This indicates hostapd isn't properly controlling the interface"
+        
+        # Show interface details for debugging
+        log_message "Interface details: $(ip link show $WIFI_INTERFACE)"
+        log_message "Interface addresses: $(ip addr show $WIFI_INTERFACE | grep inet)"
+        
         sudo systemctl stop hostapd
-        sleep 2
-        sudo hostapd /etc/hostapd/hostapd.conf -B -d 2>&1 | head -10 | while read line; do
-            log_message "hostapd debug: $line"
-        done
+        sudo systemctl unmask wpa_supplicant@wlan0 wpa_supplicant dhcpcd 2>/dev/null || true
         return 1
     fi
     
     # Start dnsmasq
+    log_message "Starting dnsmasq"
     sudo systemctl start dnsmasq
     if ! sudo systemctl is-active --quiet dnsmasq; then
         log_message "ERROR: dnsmasq failed to start"
+        sudo systemctl stop hostapd
+        sudo systemctl unmask wpa_supplicant@wlan0 wpa_supplicant dhcpcd 2>/dev/null || true
         return 1
     fi
     
@@ -166,8 +199,9 @@ start_hotspot() {
         log_message "WARNING: iptables not available, NAT forwarding not configured"
     fi
     
-    # Final verification
-    sleep 5
+    # Final verification with more time
+    log_message "Verifying hotspot functionality"
+    sleep 10
     
     # Check if interface is properly configured
     if ! ip addr show $WIFI_INTERFACE | grep -q "192.168.66.66"; then
@@ -175,15 +209,25 @@ start_hotspot() {
         return 1
     fi
     
-    # Check if hotspot is broadcasting
-    sleep 10  # Give more time for hostapd to fully initialize
-    if sudo iwlist $WIFI_INTERFACE scan 2>/dev/null | grep -q "$(hostname)-hotspot"; then
-        log_message "✅ Hotspot is broadcasting and ready"
-    else
-        log_message "WARNING: Hotspot may not be broadcasting yet (still initializing)"
+    # Check if hostapd is actually running and interface is in AP mode
+    if ! pgrep hostapd > /dev/null; then
+        log_message "ERROR: hostapd process not running"
+        return 1
     fi
     
-    log_message "Hotspot services started successfully"
+    # Try to detect if hotspot is broadcasting (with timeout)
+    log_message "Checking if hotspot is broadcasting..."
+    if timeout 15s sudo iwlist $WIFI_INTERFACE scan 2>/dev/null | grep -q "TestBenchLinuxRoro-hotspot"; then
+        log_message "✅ SUCCESS: Hotspot 'TestBenchLinuxRoro-hotspot' is broadcasting and discoverable!"
+    else
+        log_message "⚠️  WARNING: Cannot detect hotspot broadcasting yet (may still be initializing)"
+    fi
+    
+    log_message "✅ Hotspot services started successfully - ready for connections"
+    
+    # Re-enable services for future use (but don't start them)
+    sudo systemctl unmask wpa_supplicant@wlan0 wpa_supplicant dhcpcd 2>/dev/null || true
+    
     return 0
 }
 
