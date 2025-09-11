@@ -191,10 +191,21 @@ start_hotspot() {
     # Configure iptables for NAT forwarding (if available)
     if command -v iptables >/dev/null 2>&1; then
         log_message "Configuring NAT forwarding with iptables"
+        
+        # Remove any existing hotspot rules first to prevent duplicates
+        sudo iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
+        sudo iptables -D FORWARD -i $WIFI_INTERFACE -o eth0 -j ACCEPT 2>/dev/null || true
+        sudo iptables -D FORWARD -i eth0 -o $WIFI_INTERFACE -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+        
+        # Add fresh rules
         sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
         sudo iptables -A FORWARD -i $WIFI_INTERFACE -o eth0 -j ACCEPT 2>/dev/null || true
         sudo iptables -A FORWARD -i eth0 -o $WIFI_INTERFACE -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+        
+        # Enable IP forwarding
         echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
+        
+        log_message "✅ NAT forwarding configured"
     else
         log_message "WARNING: iptables not available, NAT forwarding not configured"
     fi
