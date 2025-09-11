@@ -16,7 +16,7 @@
 
 Make sure git is install on your machine first
 ```bash
-sudo apt-get install git
+sudo apt-get install -y git
 ```
 then
 ```bash
