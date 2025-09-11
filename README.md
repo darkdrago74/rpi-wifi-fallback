@@ -14,6 +14,11 @@
 
 ## 🚀 Quick Installation
 
+Make sure git is install on your machine first
+```bash
+sudo apt-get install git
+```
+then
 ```bash
 git clone https://github.com/darkdrago74/rpi-wifi-fallback.git
 cd rpi-wifi-fallback
