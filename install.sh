@@ -70,9 +70,14 @@ log "=================================================================="
 log "Updating system packages..."
 sudo apt update
 
+# Pre-configure iptables-persistent to not ask questions
+log "Pre-configuring iptables-persistent to save current rules automatically..."
+echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+
 # Install required packages INCLUDING iptables and networking tools
 log "Installing required packages (including iptables support)..."
-sudo apt install -y \
+DEBIAN_FRONTEND=noninteractive sudo apt install -y \
     hostapd \
     dnsmasq \
     lighttpd \
