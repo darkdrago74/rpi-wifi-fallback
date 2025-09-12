@@ -1,16 +1,59 @@
 #!/bin/bash
-echo "Content-Type: text/html"
-echo ""
 
-# Parse POST data
+# Function to send JSON response
+send_json_response() {
+    echo "Content-Type: application/json"
+    echo ""
+    echo "$1"
+}
+
+# Function to send HTML response
+send_html_response() {
+    echo "Content-Type: text/html"
+    echo ""
+    echo "$1"
+}
+
+# Function to send plain text response
+send_text_response() {
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "$1"
+}
+
+# Simple URL decode function
+urldecode() {
+    local url_encoded="${1//+/ }"
+    printf '%b' "${url_encoded//%/\\x}"
+}
+
+# Handle GET requests for configuration
+if [ "$REQUEST_METHOD" = "GET" ]; then
+    # Parse query string
+    QUERY_ACTION=$(echo "$QUERY_STRING" | grep -o 'action=[^&]*' | cut -d'=' -f2)
+    
+    if [ "$QUERY_ACTION" = "getconfig" ]; then
+        # Return current configuration
+        if [ -f /etc/wifi-fallback.conf ]; then
+            send_text_response "$(cat /etc/wifi-fallback.conf)"
+        else
+            send_text_response ""
+        fi
+        exit 0
+    elif [ "$QUERY_ACTION" = "gethostname" ]; then
+        # Return hostname
+        send_text_response "$(hostname)"
+        exit 0
+    else
+        # Return the form page
+        send_html_response "$(cat /var/www/html/index.html)"
+        exit 0
+    fi
+fi
+
+# Handle POST requests
 if [ "$REQUEST_METHOD" = "POST" ]; then
     read POST_DATA
-    
-    # Simple URL decode function
-    urldecode() {
-        local url_encoded="${1//+/ }"
-        printf '%b' "${url_encoded//%/\\x}"
-    }
     
     # Extract parameters
     ACTION=$(echo "$POST_DATA" | grep -o 'action=[^&]*' | cut -d'=' -f2)
@@ -46,58 +89,197 @@ EOF
     # Log the configuration change
     echo "$(date): [WEB-CONFIG] Configuration updated via web interface" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     
-    echo '<!DOCTYPE html>'
-    echo '<html><head><title>Configuration Saved</title>'
-    echo '<meta name="viewport" content="width=device-width, initial-scale=1">'
-    echo '<style>'
-    echo 'body{font-family:Arial;margin:0;padding:20px;background:#f5f5f5;}'
-    echo '.container{max-width:500px;margin:0 auto;padding:30px;background:white;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);}'
-    echo '.success{color:#155724;background:#d4edda;padding:15px;border-radius:5px;margin:20px 0;border:1px solid #c3e6cb;}'
-    echo '.info{background:#cce5ff;padding:15px;border-radius:5px;margin:20px 0;border:1px solid #b8daff;color:#004085;}'
-    echo '.warning{background:#f8d7da;padding:15px;border-radius:5px;margin:20px 0;border:1px solid #f5c6cb;color:#721c24;}'
-    echo 'h1{color:#333;text-align:center;}'
-    echo 'a{color:#007bff;text-decoration:none;}'
-    echo 'a:hover{text-decoration:underline;}'
-    echo '.center{text-align:center;}'
-    echo '</style>'
-    echo '</head><body><div class="container">'
-    echo '<h1>✅ Configuration Saved!</h1>'
+    # Generate response HTML
+    HOSTNAME=$(hostname)
+    
+    HTML_RESPONSE='<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Configuration Saved</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 30px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .success {
+            color: #155724;
+            background: #d4edda;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #c3e6cb;
+        }
+        .info {
+            background: #cce5ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #b8daff;
+            color: #004085;
+        }
+        .warning {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #ffeeba;
+            color: #856404;
+        }
+        .center { text-align: center; }
+        a {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        a:hover { text-decoration: underline; }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        .button:hover {
+            background: #0056b3;
+            text-decoration: none;
+        }
+        .config-details {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-family: monospace;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✅ Configuration Saved!</h1>'
     
     if [ "$FORCE_HOTSPOT_VAL" = "true" ]; then
-        echo '<div class="warning"><strong>⚠️ Force Hotspot Mode: ENABLED</strong><br>'
-        echo 'The device will stay in hotspot mode until this setting is disabled.</div>'
+        HTML_RESPONSE="$HTML_RESPONSE
+        <div class='warning'>
+            <strong>⚠️ Force Hotspot Mode: ENABLED</strong><br>
+            The device will stay in hotspot mode until this setting is disabled.
+        </div>"
     else
-        echo '<div class="success">'
+        HTML_RESPONSE="$HTML_RESPONSE
+        <div class='success'>
+            <strong>Configuration Updated:</strong><br>"
+        
         if [ -n "$MAIN_SSID" ]; then
-            echo '<strong>Primary Network:</strong> '"$MAIN_SSID"'<br>'
+            HTML_RESPONSE="$HTML_RESPONSE
+            • Primary Network: <strong>$MAIN_SSID</strong><br>"
         fi
+        
         if [ -n "$BACKUP_SSID" ]; then
-            echo '<strong>Backup Network:</strong> '"$BACKUP_SSID"'<br>'
+            HTML_RESPONSE="$HTML_RESPONSE
+            • Backup Network: <strong>$BACKUP_SSID</strong><br>"
         fi
-        echo '<strong>Force Hotspot:</strong> Disabled (Auto-fallback mode)</div>'
+        
+        HTML_RESPONSE="$HTML_RESPONSE
+            • Force Hotspot: Disabled (Auto-fallback mode)
+        </div>"
     fi
     
     if [ "$ACTION" = "restart" ]; then
-        echo '<div class="info">🔄 <strong>Restarting WiFi service...</strong><br>'
-        echo 'The service will restart in 3 seconds to apply changes immediately.</div>'
-        echo '<p class="center">Page will redirect in 15 seconds...</p>'
-        echo '<script>setTimeout(function(){ window.location.href="/"; }, 15000);</script>'
+        HTML_RESPONSE="$HTML_RESPONSE
+        <div class='info'>
+            <strong>🔄 Restarting WiFi service...</strong><br>
+            The service will restart to apply changes immediately.
+            <div class='spinner'></div>
+        </div>
+        <p class='center'>Page will redirect in 15 seconds...</p>
+        <script>
+            setTimeout(function(){ 
+                window.location.href='/'; 
+            }, 15000);
+        </script>"
+        
         # Restart the service in background
-        (sleep 3; sudo systemctl restart wifi-fallback.service) &
+        (sleep 2; sudo systemctl restart wifi-fallback.service) &
     else
-        echo '<div class="info">💾 <strong>Settings saved!</strong><br>'
-        echo 'Changes will be applied automatically within 30 seconds.</div>'
+        HTML_RESPONSE="$HTML_RESPONSE
+        <div class='info'>
+            <strong>💾 Settings saved!</strong><br>
+            Changes will be applied automatically within 30 seconds.
+        </div>"
     fi
     
-    echo '<p class="center"><a href="/">← Back to Configuration</a></p>'
-    echo '</div></body></html>'
+    HTML_RESPONSE="$HTML_RESPONSE
+        <p class='center'>
+            <a href='/' class='button'>← Back to Configuration</a>
+        </p>
+    </div>
+</body>
+</html>"
+    
+    send_html_response "$HTML_RESPONSE"
     
 else
-    # GET request or other methods
-    echo '<!DOCTYPE html>'
-    echo '<html><head><title>Method Not Allowed</title></head>'
-    echo '<body><h1>Method not allowed</h1>'
-    echo '<p>This page only accepts POST requests.</p>'
-    echo '<p><a href="/">Back to configuration</a></p>'
-    echo '</body></html>'
+    # Handle other request methods
+    HTML_RESPONSE='<!DOCTYPE html>
+<html>
+<head>
+    <title>Method Not Allowed</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Method not allowed</h1>
+        <p>This page only accepts POST requests.</p>
+        <p><a href="/">Back to configuration</a></p>
+    </div>
+</body>
+</html>'
+    
+    send_html_response "$HTML_RESPONSE"
 fi
