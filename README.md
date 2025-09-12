@@ -32,7 +32,7 @@ chmod +x check.sh reset.sh backup.sh uninstall.sh
 ### Alternative One-Liner Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | DEBIAN_FRONTEND=noninteractive bash
 ```
 
 ## 🔧 Configuration
