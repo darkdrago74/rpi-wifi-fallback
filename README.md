@@ -23,6 +23,9 @@ then
 git clone https://github.com/darkdrago74/rpi-wifi-fallback.git
 cd rpi-wifi-fallback
 chmod +x install.sh
+chmod +x scripts/*.sh
+chmod +x web/*.cgi
+chmod +x check.sh reset.sh backup.sh uninstall.sh
 ./install.sh
 ```
 
