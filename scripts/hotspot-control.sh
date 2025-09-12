@@ -7,6 +7,18 @@ log_message() {
     echo "$(date): [HOTSPOT-CONTROL] $1" | sudo tee -a "$LOG_FILE"
 }
 
+get_connected_clients() {
+    # Function to get connected clients count
+    local count=$(sudo arp -an | grep -c "192.168.66" || echo "0")
+    echo "$count"
+}
+
+get_wifi_ip() {
+    # Function to get WiFi IP address
+    local ip=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+    echo "$ip"
+}
+
 case "$1" in
     on|enable|start)
         echo "Enabling manual hotspot mode..."
@@ -20,14 +32,20 @@ case "$1" in
         fi
         
         echo "✅ Manual hotspot mode ENABLED"
-        echo "⏳ Changes will apply within 30 seconds..."
+        echo "⏳ Switching to hotspot mode..."
+        echo ""
+        
+        # Force immediate switch by restarting service
+        sudo systemctl restart wifi-fallback
+        
+        echo "⏳ Please wait 15-30 seconds for hotspot to activate..."
         echo ""
         echo "📡 Hotspot Name: $(hostname)-hotspot"
         echo "🔑 Password: raspberry"
         echo "🌐 WiFi Config: http://192.168.66.66:8080"
         echo "🖨️ Klipper/Mainsail: http://192.168.66.66"
         
-        log_message "Force hotspot enabled in config"
+        log_message "Force hotspot enabled in config, service restarted"
         ;;
         
     off|disable|stop)
@@ -42,16 +60,16 @@ case "$1" in
         fi
         
         echo "✅ Manual hotspot mode DISABLED"
-        echo "📶 Will attempt to connect to configured WiFi networks within 30 seconds"
+        echo "📶 Switching back to WiFi mode..."
         
         # Show current configured networks
         if [ -f "$CONFIG_FILE" ]; then
             source "$CONFIG_FILE"
             if [ -n "$MAIN_SSID" ]; then
-                echo "   Primary network: $MAIN_SSID"
+                echo "   Will try primary network: $MAIN_SSID"
             fi
             if [ -n "$BACKUP_SSID" ]; then
-                echo "   Backup network: $BACKUP_SSID"
+                echo "   Will try backup network: $BACKUP_SSID"
             fi
             if [ -z "$MAIN_SSID" ] && [ -z "$BACKUP_SSID" ]; then
                 echo "⚠️  WARNING: No WiFi networks configured!"
@@ -60,7 +78,12 @@ case "$1" in
             fi
         fi
         
-        log_message "Force hotspot disabled in config"
+        # Force immediate switch by restarting service
+        sudo systemctl restart wifi-fallback
+        
+        echo "⏳ Please wait 15-30 seconds for WiFi connection..."
+        
+        log_message "Force hotspot disabled in config, service restarted"
         ;;
         
     status)
@@ -109,21 +132,38 @@ case "$1" in
                 echo "   NAT: ❌ Not configured (no internet sharing)"
             fi
             
-            # Check connected clients
-            local clients=$(sudo arp -an | grep -c "192.168.66" || echo "0")
+            # Check connected clients using function
+            clients=$(get_connected_clients)
             echo "   Connected clients: $clients"
         else
             # Check WiFi connection
             if iwgetid wlan0 >/dev/null 2>&1; then
                 echo "   Mode: WIFI CLIENT"
-                echo "   Connected to: $(iwgetid wlan0 -r)"
-                local ip=$(ip -4 addr show wlan0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
-                if [ -n "$ip" ]; then
-                    echo "   IP address: $ip"
+                connected_ssid=$(iwgetid wlan0 -r)
+                if [ -n "$connected_ssid" ]; then
+                    echo "   Connected to: $connected_ssid"
+                    wifi_ip=$(get_wifi_ip)
+                    if [ -n "$wifi_ip" ]; then
+                        echo "   IP address: $wifi_ip"
+                    fi
                 fi
             else
-                echo "   Mode: DISCONNECTED"
+                echo "   Mode: DISCONNECTED/TRANSITIONING"
             fi
+        fi
+        
+        # Check Ethernet status
+        echo ""
+        echo "🔌 Ethernet Status:"
+        if ip link show eth0 | grep -q "state UP"; then
+            eth_ip=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+            if [ -n "$eth_ip" ]; then
+                echo "   Connected with IP: $eth_ip"
+            else
+                echo "   Connected but no IP assigned"
+            fi
+        else
+            echo "   Not connected"
         fi
         
         echo ""
