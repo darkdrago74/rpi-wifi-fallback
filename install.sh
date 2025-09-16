@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# RPi WiFi Fallback Hotspot - Installer v2.5 with Connection Preservation
+# RPi WiFi Fallback Hotspot - Installer v2.6 with Fixed Installation Order
 # Author: darkdrago74
 # GitHub: https://github.com/darkdrago74/rpi-wifi-fallback
-# Version: 2.5.0 - Preserves active WiFi during installation
+# Version: 2.6.0 - Fixed iptables installation sequence
 
 set -e  # Exit on any error
 
@@ -54,7 +54,7 @@ if [[ $EUID -eq 0 ]]; then
    error "This script should not be run as root. Use: ./install.sh"
 fi
 
-log "Starting RPi WiFi Fallback Installation v2.5..."
+log "Starting RPi WiFi Fallback Installation v2.6..."
 log "=================================================================="
 
 # CRITICAL: Detect and preserve current WiFi connection
@@ -62,9 +62,9 @@ PRESERVE_WIFI=false
 CURRENT_SSID=""
 CURRENT_IP=""
 
-if iwgetid wlan0 >/dev/null 2>&1; then
+if command -v iwgetid >/dev/null 2>&1 && iwgetid wlan0 >/dev/null 2>&1; then
     CURRENT_SSID=$(iwgetid wlan0 -r)
-    CURRENT_IP=$(ip -4 addr show wlan0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+    CURRENT_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
     
     if [ -n "$CURRENT_SSID" ] && [ -n "$CURRENT_IP" ]; then
         PRESERVE_WIFI=true
@@ -85,8 +85,30 @@ fi
 log "Updating system packages..."
 sudo apt update
 
-# Clear problematic iptables rules but keep SSH
+# Show upgradable packages info
+UPGRADABLE=$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo "0")
+if [ "$UPGRADABLE" -gt 0 ]; then
+    info "📦 $UPGRADABLE packages can be upgraded (not required for this installation)"
+fi
+
+# FIRST: Install iptables and other essential packages
+log "Installing essential packages first..."
+sudo apt install -y \
+    iptables \
+    iptables-persistent \
+    netfilter-persistent \
+    iw \
+    wireless-tools \
+    net-tools
+
+# NOW we can use iptables commands
 log "Preparing iptables..."
+# Check if iptables is available
+if ! command -v iptables >/dev/null 2>&1; then
+    error "iptables installation failed. Please run: sudo apt install iptables"
+fi
+
+# Clear problematic rules but keep SSH
 sudo iptables -F INPUT 2>/dev/null || true
 sudo iptables -F FORWARD 2>/dev/null || true
 sudo iptables -t nat -F 2>/dev/null || true
@@ -97,26 +119,17 @@ sudo iptables -P INPUT ACCEPT
 sudo iptables -P FORWARD ACCEPT
 sudo iptables -P OUTPUT ACCEPT
 
-# Install packages
-log "Installing required packages..."
+# Install remaining packages
+log "Installing remaining packages..."
 sudo apt install -y \
     hostapd \
     dnsmasq \
     lighttpd \
     git \
-    iptables \
-    iw \
-    wireless-tools \
-    net-tools \
     curl \
     wget
 
-# Install iptables-persistent
-log "Installing iptables-persistent..."
-log "➡️  If prompted about saving rules, select YES"
-sudo apt install -y iptables-persistent netfilter-persistent
-
-# Enable services
+# Configure services
 sudo systemctl enable netfilter-persistent 2>/dev/null || true
 sudo systemctl start netfilter-persistent 2>/dev/null || true
 
@@ -203,8 +216,11 @@ if systemctl is-enabled --quiet dhcpcd 2>/dev/null; then
     if [ "$PRESERVE_WIFI" = true ]; then
         warning "dhcpcd config will be updated after reboot"
         # Create pending config
-        echo "# Added by wifi-fallback installer" | sudo tee -a /etc/dhcpcd.conf.pending
-        echo "denyinterfaces wlan0" | sudo tee -a /etc/dhcpcd.conf.pending
+        if [ -f /etc/dhcpcd.conf ]; then
+            sudo cp /etc/dhcpcd.conf /etc/dhcpcd.conf.pending
+            echo "# Added by wifi-fallback installer" | sudo tee -a /etc/dhcpcd.conf.pending
+            echo "denyinterfaces wlan0" | sudo tee -a /etc/dhcpcd.conf.pending
+        fi
     else
         if ! grep -q "denyinterfaces wlan0" /etc/dhcpcd.conf 2>/dev/null; then
             echo "# Added by wifi-fallback installer" | sudo tee -a /etc/dhcpcd.conf
@@ -292,7 +308,7 @@ wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 EOF
 
-# Configure iptables
+# Configure iptables (now that it's installed)
 log "Configuring iptables rules..."
 sudo iptables -t nat -A POSTROUTING -s 192.168.66.0/24 ! -d 192.168.66.0/24 -j MASQUERADE
 sudo iptables -A FORWARD -i wlan0 -j ACCEPT
@@ -306,6 +322,8 @@ sudo iptables -A INPUT -p udp --dport 67:68 -j ACCEPT
 sudo iptables -A INPUT -p udp --dport 53 -j ACCEPT
 sudo iptables -A INPUT -p tcp --dport 53 -j ACCEPT
 
+# Save iptables rules
+log "Saving iptables rules..."
 sudo netfilter-persistent save
 
 # Install web interface
@@ -337,6 +355,35 @@ esac
 EOF
 sudo chmod +x /usr/local/bin/hotspot
 
+# Create netdiag tool
+log "Installing diagnostic tools..."
+sudo tee /usr/local/bin/netdiag > /dev/null <<'EOF'
+#!/bin/bash
+echo "=== Network Diagnostics ==="
+echo "Date: $(date)"
+echo ""
+echo "--- Interface Status ---"
+ip -br addr show
+echo ""
+echo "--- WiFi Status ---"
+if command -v iwgetid >/dev/null 2>&1; then
+    iwgetid wlan0 2>/dev/null || echo "WiFi not connected"
+fi
+echo ""
+echo "--- Default Routes ---"
+ip route | grep default
+echo ""
+echo "--- iptables NAT rules ---"
+sudo iptables -t nat -L POSTROUTING -n -v 2>/dev/null | head -5 || echo "iptables not configured"
+echo ""
+echo "--- Services ---"
+echo -n "wifi-fallback: "; systemctl is-active wifi-fallback 2>/dev/null || echo "inactive"
+echo -n "NetworkManager: "; systemctl is-active NetworkManager 2>/dev/null || echo "inactive"
+echo -n "hostapd: "; systemctl is-active hostapd 2>/dev/null || echo "inactive"
+echo -n "dnsmasq: "; systemctl is-active dnsmasq 2>/dev/null || echo "inactive"
+EOF
+sudo chmod +x /usr/local/bin/netdiag
+
 # Configure lighttpd
 log "Configuring web server..."
 sudo lighttpd-enable-mod cgi 2>/dev/null || true
@@ -360,7 +407,10 @@ if [ ! -f /etc/wifi-fallback.conf ]; then
     # If we have current WiFi, pre-populate it
     if [ "$PRESERVE_WIFI" = true ] && [ -n "$CURRENT_SSID" ]; then
         # Try to extract password from wpa_supplicant
-        CURRENT_PSK=$(sudo grep -A3 "ssid=\"$CURRENT_SSID\"" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null | grep "psk=" | cut -d'"' -f2 | head -1)
+        CURRENT_PSK=""
+        if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+            CURRENT_PSK=$(sudo grep -A3 "ssid=\"$CURRENT_SSID\"" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null | grep "psk=" | cut -d'"' -f2 | head -1)
+        fi
         
         sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
 MAIN_SSID="$CURRENT_SSID"
@@ -369,7 +419,7 @@ BACKUP_SSID=""
 BACKUP_PASSWORD=""
 FORCE_HOTSPOT=false
 EOF
-        info "Current WiFi saved to configuration"
+        info "Current WiFi saved as primary network"
     else
         sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
 MAIN_SSID=""
@@ -389,6 +439,7 @@ sudo chmod 644 /var/log/wifi-fallback.log
 if [ "$PRESERVE_WIFI" = true ]; then
     warning "⚠️  Service NOT started to preserve WiFi connection"
     info "   Service will start automatically after reboot"
+    sudo systemctl restart lighttpd 2>/dev/null || true
 else
     log "Starting WiFi fallback service..."
     sudo systemctl restart lighttpd 2>/dev/null || true
@@ -396,6 +447,10 @@ else
 fi
 
 HOSTNAME=$(hostname)
+
+# Run quick diagnostic
+log "Running quick diagnostic check..."
+netdiag
 
 log "=================================================================="
 log "✅ Installation completed!"
@@ -411,10 +466,18 @@ fi
 info "📡 Hotspot: ${HOSTNAME}-hotspot (password: raspberry)"
 info "🌐 Config: http://192.168.66.66:8080 (in hotspot mode)"
 log ""
+info "📋 Commands available:"
+info "• hotspot status - Check current status"
+info "• hotspot on     - Force hotspot mode"
+info "• hotspot off    - Return to WiFi"
+info "• netdiag        - Run diagnostics"
+log ""
 warning "⚠️  REBOOT REQUIRED to complete installation"
 info "   sudo reboot"
 log ""
 info "After reboot:"
-info "• The system will use your current WiFi as primary network"
+if [ "$PRESERVE_WIFI" = true ]; then
+    info "• The system will use $CURRENT_SSID as primary network"
+fi
 info "• Fallback to hotspot if WiFi fails"
-info "• Check status: hotspot status"
+info "• Configure via web at http://192.168.66.66:8080"
