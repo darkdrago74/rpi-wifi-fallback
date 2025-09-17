@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# RPi WiFi Fallback Hotspot - Installer v0.7 Simplified
+# RPi WiFi Fallback Hotspot - Installer v0.7.1 Fixed
 # Author: darkdrago74
 # GitHub: https://github.com/darkdrago74/rpi-wifi-fallback
-# Version: 0.7.0 - Simplified with forced hotspot on first boot
+# Version: 0.7.1 - Fixed NetworkManager hang, using nmcli for WiFi
 
 set -e  # Exit on any error
 
@@ -52,7 +52,7 @@ if [[ $EUID -eq 0 ]]; then
    error "This script should not be run as root. Use: ./install.sh"
 fi
 
-log "Starting RPi WiFi Fallback Installation v0.7..."
+log "Starting RPi WiFi Fallback Installation v0.7.1..."
 log "=================================================================="
 
 # Update system
@@ -94,15 +94,30 @@ sudo systemctl stop dnsmasq 2>/dev/null || true
 sudo systemctl disable hostapd 2>/dev/null || true
 sudo systemctl disable dnsmasq 2>/dev/null || true
 
-# Handle NetworkManager if present
-if systemctl is-active --quiet NetworkManager 2>/dev/null; then
-    log "Configuring NetworkManager to ignore wlan0..."
+# Handle NetworkManager if present - FIX: Don't reload/restart during installation
+if command -v NetworkManager >/dev/null 2>&1 && systemctl is-enabled --quiet NetworkManager 2>/dev/null; then
+    log "NetworkManager detected - configuring to ignore wlan0..."
     sudo mkdir -p /etc/NetworkManager/conf.d/
+    
+    # Write the config file
     cat <<'EOF' | sudo tee /etc/NetworkManager/conf.d/99-unmanaged-devices.conf >/dev/null
 [keyfile]
 unmanaged-devices=interface-name:wlan0
 EOF
-    sudo systemctl reload NetworkManager 2>/dev/null || true
+    
+    # Try to reload with timeout, but don't fail if it hangs
+    log "Applying NetworkManager configuration..."
+    if command -v nmcli >/dev/null 2>&1; then
+        # Use timeout to prevent hanging
+        sudo timeout 5 nmcli general reload 2>/dev/null || true
+        sudo timeout 5 nmcli device set wlan0 managed no 2>/dev/null || true
+    else
+        log "nmcli not available - configuration will apply after reboot"
+    fi
+    
+    log "NetworkManager configured"
+else
+    log "NetworkManager not active - skipping"
 fi
 
 # Handle dhcpcd if present
@@ -231,6 +246,28 @@ case "$1" in
 esac
 EOF
 sudo chmod +x /usr/local/bin/hotspot
+
+# Create diagnostic tool
+log "Installing diagnostic tool..."
+sudo tee /usr/local/bin/netdiag > /dev/null <<'EOF'
+#!/bin/bash
+echo "=== Network Diagnostics ==="
+echo "Date: $(date)"
+echo ""
+echo "--- Interface Status ---"
+ip -br addr show
+echo ""
+echo "--- WiFi Status ---"
+if command -v iwgetid >/dev/null 2>&1; then
+    iwgetid wlan0 2>/dev/null || echo "WiFi not connected"
+fi
+echo ""
+echo "--- Services ---"
+echo -n "wifi-fallback: "; systemctl is-active wifi-fallback 2>/dev/null || echo "inactive"
+echo -n "hostapd: "; systemctl is-active hostapd 2>/dev/null || echo "inactive"
+echo -n "dnsmasq: "; systemctl is-active dnsmasq 2>/dev/null || echo "inactive"
+EOF
+sudo chmod +x /usr/local/bin/netdiag
 
 # Configure lighttpd
 log "Configuring web server..."
