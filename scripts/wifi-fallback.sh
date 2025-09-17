@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# WiFi Fallback Script v2.1 - Stable state transitions
+# WiFi Fallback Script v3.0 - Using nmcli for reliable connections
 # Configuration
 WIFI_INTERFACE="wlan0"
 HOTSPOT_SSID="$(hostname)-hotspot"
@@ -8,6 +8,7 @@ HOTSPOT_PASSWORD="raspberry"
 HOTSPOT_IP="192.168.66.66"
 CHECK_INTERVAL=30
 MAX_RETRIES=4
+RECONNECT_INTERVAL=900  # 15 minutes between reconnection attempts
 MAIN_SSID=""
 MAIN_PASSWORD=""
 BACKUP_SSID=""
@@ -15,9 +16,6 @@ BACKUP_PASSWORD=""
 FORCE_HOTSPOT=false
 
 # Files
-WPA_CONF="/etc/wpa_supplicant/wpa_supplicant.conf"
-HOSTAPD_CONF="/etc/hostapd/hostapd.conf"
-DNSMASQ_CONF="/etc/dnsmasq.conf"
 CONFIG_FILE="/etc/wifi-fallback.conf"
 
 # Load configuration if exists
@@ -29,63 +27,55 @@ log_message() {
     echo "$(date): $1" | sudo tee -a /var/log/wifi-fallback.log
 }
 
-# Complete cleanup function - kills ALL conflicting processes
+# Check if clients are connected to hotspot
+get_hotspot_clients() {
+    local count=0
+    if pgrep hostapd >/dev/null; then
+        # Count ARP entries in hotspot subnet
+        count=$(sudo arp -an | grep -c "192.168.66" 2>/dev/null || echo "0")
+    fi
+    echo $count
+}
+
+# Simple cleanup without killing everything
+simple_cleanup_interface() {
+    log_message "Cleaning up interface $WIFI_INTERFACE"
+    
+    # Just flush addresses and reset interface
+    sudo ip addr flush dev "$WIFI_INTERFACE" 2>/dev/null || true
+    sudo ip link set "$WIFI_INTERFACE" down
+    sleep 2
+    sudo ip link set "$WIFI_INTERFACE" up
+    sleep 2
+}
+
+# Deep cleanup only when necessary
 deep_cleanup_interface() {
     log_message "Performing deep cleanup of $WIFI_INTERFACE"
     
-    # Stop all services that might interfere
-    sudo systemctl stop wpa_supplicant 2>/dev/null || true
-    sudo systemctl stop wpa_supplicant@wlan0 2>/dev/null || true
-    sudo systemctl stop hostapd 2>/dev/null || true
-    sudo systemctl stop dnsmasq 2>/dev/null || true
-    sudo systemctl stop dhcpcd 2>/dev/null || true
+    # Stop NetworkManager's control of wlan0 temporarily
+    sudo nmcli device set wlan0 managed no 2>/dev/null || true
     
-    # Kill processes multiple times to ensure they're dead
-    for i in {1..3}; do
-        sudo killall -9 wpa_supplicant 2>/dev/null || true
-        sudo killall -9 hostapd 2>/dev/null || true
-        sudo killall -9 dnsmasq 2>/dev/null || true
-        sudo killall -9 dhclient 2>/dev/null || true
-        sudo killall -9 dhcpcd 2>/dev/null || true
-        sudo killall -9 wpa_cli 2>/dev/null || true
-        sleep 1
-    done
+    # Kill old processes
+    sudo killall -9 wpa_supplicant 2>/dev/null || true
+    sudo killall -9 hostapd 2>/dev/null || true
+    sudo killall -9 dnsmasq 2>/dev/null || true
+    sudo killall -9 dhclient 2>/dev/null || true
     
-    # Remove any control sockets
-    sudo rm -rf /var/run/wpa_supplicant/* 2>/dev/null || true
-    sudo rm -rf /tmp/wpa_ctrl_* 2>/dev/null || true
-    
-    # Clear IP addresses
-    sudo ip addr flush dev "$WIFI_INTERFACE" 2>/dev/null || true
-    
-    # Bring interface completely down
-    sudo ip link set "$WIFI_INTERFACE" down
     sleep 2
     
-    # Bring back up
-    sudo ip link set "$WIFI_INTERFACE" up
-    sleep 2
+    # Clean interface
+    simple_cleanup_interface
     
     log_message "Deep cleanup completed"
 }
 
 is_wifi_connected() {
-    # More thorough connection check
-    if ! command -v wpa_cli >/dev/null 2>&1; then
-        return 1
-    fi
-    
-    # Check if wpa_supplicant is running and connected
-    if wpa_cli -i "$WIFI_INTERFACE" status 2>/dev/null | grep -q "wpa_state=COMPLETED"; then
-        # Also verify we have an IP
+    # Use nmcli to check connection status
+    if nmcli device status | grep -q "^$WIFI_INTERFACE.*connected"; then
+        # Verify we have an IP
         if ip addr show "$WIFI_INTERFACE" | grep -q "inet .*scope global"; then
-            # Try to ping gateway to verify connection
-            local gateway=$(ip route | grep default | grep "$WIFI_INTERFACE" | awk '{print $3}' | head -1)
-            if [ -n "$gateway" ]; then
-                if ping -c 1 -W 2 "$gateway" >/dev/null 2>&1; then
-                    return 0
-                fi
-            fi
+            return 0
         fi
     fi
     return 1
@@ -99,86 +89,60 @@ is_hotspot_active() {
     return 1
 }
 
-connect_to_wifi() {
+connect_to_wifi_nmcli() {
     local ssid="$1"
     local password="$2"
     local network_name="$3"
     
     [ -z "$ssid" ] && return 1
     
-    log_message "Attempting to connect to $network_name: $ssid"
+    log_message "Attempting to connect to $network_name: $ssid using nmcli"
     
     # Ensure we're not in hotspot mode
     if is_hotspot_active; then
-        log_message "Hotspot is active, stopping it first"
+        log_message "Stopping hotspot first"
         stop_hotspot
-        sleep 5
+        sleep 3
     fi
     
-    # Deep cleanup before attempting connection
-    deep_cleanup_interface
+    # Enable NetworkManager control of wlan0
+    sudo nmcli device set wlan0 managed yes 2>/dev/null || true
+    sleep 2
     
-    # Create wpa_supplicant config
-    sudo tee /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null <<EOF
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=GB
-
-network={
-    ssid="$ssid"
-    psk="$password"
-    key_mgmt=WPA-PSK
-    scan_ssid=1
-    priority=1
-}
-EOF
+    # Delete existing connection if exists
+    sudo nmcli connection delete "$ssid" 2>/dev/null || true
     
-    # Start wpa_supplicant with better error checking
-    log_message "Starting wpa_supplicant..."
-    if ! sudo wpa_supplicant -B -i "$WIFI_INTERFACE" -c /etc/wpa_supplicant/wpa_supplicant.conf -f /var/log/wpa_supplicant.log; then
-        log_message "Failed to start wpa_supplicant"
-        return 1
-    fi
-    
-    # Wait for association with timeout
-    local attempts=0
-    while [ $attempts -lt 30 ]; do
-        if wpa_cli -i "$WIFI_INTERFACE" status 2>/dev/null | grep -q "wpa_state=COMPLETED"; then
-            log_message "WiFi associated successfully"
-            break
+    # Create new connection
+    if [ -n "$password" ]; then
+        # WPA/WPA2 network
+        if sudo nmcli device wifi connect "$ssid" password "$password" ifname "$WIFI_INTERFACE"; then
+            log_message "Successfully connected to $network_name via nmcli"
+            sleep 3
+            
+            # Verify connection
+            if is_wifi_connected; then
+                local ip=$(ip -4 addr show "$WIFI_INTERFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+                log_message "Connected with IP: $ip"
+                
+                # After successful connection, set wlan0 as unmanaged again
+                sudo nmcli device set wlan0 managed no 2>/dev/null || true
+                
+                return 0
+            fi
         fi
-        sleep 1
-        attempts=$((attempts + 1))
-    done
-    
-    if [ $attempts -ge 30 ]; then
-        log_message "WiFi association timeout"
-        sudo killall wpa_supplicant 2>/dev/null || true
-        return 1
-    fi
-    
-    # Request DHCP
-    log_message "Requesting DHCP..."
-    sudo dhclient -r "$WIFI_INTERFACE" 2>/dev/null || true
-    if ! sudo timeout 15 dhclient "$WIFI_INTERFACE" 2>/dev/null; then
-        log_message "DHCP request failed"
-        sudo killall wpa_supplicant 2>/dev/null || true
-        return 1
-    fi
-    
-    sleep 3
-    
-    # Verify connection
-    if is_wifi_connected; then
-        log_message "Successfully connected to $network_name"
-        local ip=$(ip -4 addr show "$WIFI_INTERFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
-        log_message "Got IP address: $ip"
-        return 0
     else
-        log_message "Failed to verify connection to $network_name"
-        sudo killall wpa_supplicant 2>/dev/null || true
-        return 1
+        # Open network
+        if sudo nmcli device wifi connect "$ssid" ifname "$WIFI_INTERFACE"; then
+            log_message "Successfully connected to open network $network_name"
+            sudo nmcli device set wlan0 managed no 2>/dev/null || true
+            return 0
+        fi
     fi
+    
+    log_message "Failed to connect to $network_name via nmcli"
+    # Set back to unmanaged on failure
+    sudo nmcli device set wlan0 managed no 2>/dev/null || true
+    return 1
 }
 
 setup_nat() {
@@ -210,12 +174,15 @@ start_hotspot() {
     # Ensure WiFi is disconnected first
     if is_wifi_connected; then
         log_message "WiFi is connected, disconnecting first"
-        sudo killall wpa_supplicant 2>/dev/null || true
+        sudo nmcli device disconnect "$WIFI_INTERFACE" 2>/dev/null || true
         sleep 3
     fi
     
-    # Deep cleanup
-    deep_cleanup_interface
+    # Clean up but less aggressively
+    simple_cleanup_interface
+    
+    # Set wlan0 as unmanaged by NetworkManager
+    sudo nmcli device set wlan0 managed no 2>/dev/null || true
     
     # Configure static IP for hotspot
     sudo ip addr add "$HOTSPOT_IP/24" dev "$WIFI_INTERFACE" 2>/dev/null || true
@@ -224,27 +191,13 @@ start_hotspot() {
     sudo sed -i "s/server.port.*=.*/server.port = 8080/" /etc/lighttpd/lighttpd.conf
     sudo systemctl restart lighttpd
     
-    # Start hostapd with retry logic
+    # Start hostapd
     log_message "Starting hostapd..."
-    local hostapd_attempts=0
-    while [ $hostapd_attempts -lt 3 ]; do
-        sudo systemctl start hostapd
-        sleep 5
-        
-        if pgrep hostapd >/dev/null; then
-            log_message "Hostapd started successfully"
-            break
-        else
-            log_message "Hostapd failed to start, attempt $((hostapd_attempts + 1))/3"
-            sudo systemctl stop hostapd 2>/dev/null || true
-            sudo killall -9 hostapd 2>/dev/null || true
-            sleep 2
-        fi
-        hostapd_attempts=$((hostapd_attempts + 1))
-    done
+    sudo systemctl start hostapd
+    sleep 5
     
     if ! pgrep hostapd >/dev/null; then
-        log_message "ERROR: Failed to start hostapd after 3 attempts"
+        log_message "ERROR: hostapd failed to start"
         return 1
     fi
     
@@ -262,16 +215,10 @@ start_hotspot() {
     # Setup NAT
     setup_nat
     
-    # Verify hotspot is working
-    sleep 3
-    if is_hotspot_active; then
-        log_message "✅ Hotspot started successfully"
-        log_message "Access points: Config UI at http://$HOTSPOT_IP:8080"
-        return 0
-    else
-        log_message "ERROR: Hotspot verification failed"
-        return 1
-    fi
+    log_message "✅ Hotspot started successfully"
+    log_message "Access points: Config UI at http://$HOTSPOT_IP:8080"
+    
+    return 0
 }
 
 stop_hotspot() {
@@ -280,10 +227,6 @@ stop_hotspot() {
     # Stop services
     sudo systemctl stop hostapd 2>/dev/null || true
     sudo systemctl stop dnsmasq 2>/dev/null || true
-    
-    # Kill any remaining processes
-    sudo killall -9 hostapd 2>/dev/null || true
-    sudo killall -9 dnsmasq 2>/dev/null || true
     
     # Clean up NAT rules
     sudo iptables -t nat -D POSTROUTING -s 192.168.66.0/24 ! -d 192.168.66.0/24 -j MASQUERADE 2>/dev/null || true
@@ -295,18 +238,27 @@ stop_hotspot() {
     sudo systemctl restart lighttpd
     
     # Clean interface
-    deep_cleanup_interface
+    simple_cleanup_interface
     
     log_message "Hotspot stopped"
 }
 
 # Main loop
-log_message "==== WiFi Fallback service starting v2.1 ===="
+log_message "==== WiFi Fallback service starting v3.0 (nmcli) ===="
+
+# Ensure NetworkManager is running
+if ! systemctl is-active --quiet NetworkManager; then
+    log_message "Starting NetworkManager..."
+    sudo systemctl start NetworkManager
+    sleep 5
+fi
+
 hotspot_active=false
 wifi_connected=false
 last_force_state="$FORCE_HOTSPOT"
 connection_attempts=0
-last_check_time=0
+last_reconnect_attempt=0
+startup_attempt=true
 
 while true; do
     current_time=$(date +%s)
@@ -318,15 +270,14 @@ while true; do
     
     # Check if force hotspot state changed
     if [ "$last_force_state" != "$FORCE_HOTSPOT" ]; then
-        log_message "Force hotspot state changed from $last_force_state to $FORCE_HOTSPOT"
+        log_message "Force hotspot state changed to: $FORCE_HOTSPOT"
         last_force_state="$FORCE_HOTSPOT"
         
         if [ "$FORCE_HOTSPOT" = "true" ]; then
             # Force hotspot mode enabled
-            log_message "Force hotspot enabled - switching to hotspot mode"
             if is_wifi_connected; then
-                log_message "Disconnecting from WiFi first"
-                sudo killall wpa_supplicant 2>/dev/null || true
+                log_message "Disconnecting from WiFi for forced hotspot"
+                sudo nmcli device disconnect "$WIFI_INTERFACE" 2>/dev/null || true
                 sleep 3
             fi
             if start_hotspot; then
@@ -335,12 +286,12 @@ while true; do
             fi
         else
             # Force hotspot disabled - try to connect to WiFi
-            log_message "Force hotspot disabled - attempting WiFi connection"
             if is_hotspot_active; then
                 stop_hotspot
                 hotspot_active=false
             fi
             connection_attempts=0
+            startup_attempt=true
         fi
     fi
     
@@ -368,56 +319,65 @@ while true; do
         
         if is_wifi_connected; then
             wifi_connected=true
+            connection_attempts=0
+            startup_attempt=false
         elif is_hotspot_active; then
             hotspot_active=true
+            
+            # Check if we should try to reconnect to WiFi
+            clients=$(get_hotspot_clients)
+            time_since_last_attempt=$((current_time - last_reconnect_attempt))
+            
+            # Only try reconnection if:
+            # 1. No clients connected
+            # 2. Enough time has passed (15 minutes)
+            # 3. We have configured networks
+            if [ "$clients" -eq 0 ] && \
+               [ $time_since_last_attempt -gt $RECONNECT_INTERVAL ] && \
+               ([ -n "$MAIN_SSID" ] || [ -n "$BACKUP_SSID" ]); then
+                log_message "No clients connected, attempting WiFi reconnection"
+                stop_hotspot
+                hotspot_active=false
+                connection_attempts=0
+                last_reconnect_attempt=$current_time
+            elif [ "$clients" -gt 0 ]; then
+                log_message "Skipping reconnection: $clients client(s) connected to hotspot"
+            fi
         fi
         
-        # Handle state transitions
+        # Not connected to anything - try to connect
         if [ "$wifi_connected" = false ] && [ "$hotspot_active" = false ]; then
-            # Not connected to anything
-            connection_attempts=$((connection_attempts + 1))
             
-            # Try main network
-            if [ -n "$MAIN_SSID" ] && [ $connection_attempts -le $MAX_RETRIES ]; then
-                log_message "Attempt $connection_attempts/$MAX_RETRIES to connect to main network"
-                if connect_to_wifi "$MAIN_SSID" "$MAIN_PASSWORD" "main"; then
-                    wifi_connected=true
+            # On startup or first attempt after hotspot, try immediately
+            if [ "$startup_attempt" = true ] || [ $connection_attempts -eq 0 ]; then
+                connection_attempts=$((connection_attempts + 1))
+                
+                # Try main network
+                if [ -n "$MAIN_SSID" ] && [ $connection_attempts -le $MAX_RETRIES ]; then
+                    log_message "Attempt $connection_attempts/$MAX_RETRIES to connect to main network"
+                    if connect_to_wifi_nmcli "$MAIN_SSID" "$MAIN_PASSWORD" "main"; then
+                        wifi_connected=true
+                        connection_attempts=0
+                        startup_attempt=false
+                    fi
+                # Try backup network
+                elif [ -n "$BACKUP_SSID" ] && [ $connection_attempts -le $((MAX_RETRIES * 2)) ]; then
+                    log_message "Attempt $((connection_attempts - MAX_RETRIES))/$MAX_RETRIES to connect to backup network"
+                    if connect_to_wifi_nmcli "$BACKUP_SSID" "$BACKUP_PASSWORD" "backup"; then
+                        wifi_connected=true
+                        connection_attempts=0
+                        startup_attempt=false
+                    fi
+                # Start hotspot as fallback
+                else
+                    log_message "All WiFi attempts failed, starting hotspot"
+                    if start_hotspot; then
+                        hotspot_active=true
+                        last_reconnect_attempt=$current_time
+                    fi
                     connection_attempts=0
+                    startup_attempt=false
                 fi
-            # Try backup network
-            elif [ -n "$BACKUP_SSID" ] && [ $connection_attempts -le $((MAX_RETRIES * 2)) ]; then
-                log_message "Attempt $((connection_attempts - MAX_RETRIES))/$MAX_RETRIES to connect to backup network"
-                if connect_to_wifi "$BACKUP_SSID" "$BACKUP_PASSWORD" "backup"; then
-                    wifi_connected=true
-                    connection_attempts=0
-                fi
-            # Start hotspot as fallback
-            else
-                log_message "All WiFi attempts failed, starting hotspot"
-                if start_hotspot; then
-                    hotspot_active=true
-                fi
-                connection_attempts=0
-            fi
-        elif [ "$wifi_connected" = true ]; then
-            # Connected to WiFi - verify it's still working
-            if ! is_wifi_connected; then
-                log_message "WiFi connection lost"
-                wifi_connected=false
-                connection_attempts=0
-            else
-                connection_attempts=0
-            fi
-        elif [ "$hotspot_active" = true ]; then
-            # In hotspot mode - periodically check if we should try WiFi again
-            if [ $((current_time - last_check_time)) -gt 300 ]; then  # Check every 5 minutes
-                if [ -n "$MAIN_SSID" ] || [ -n "$BACKUP_SSID" ]; then
-                    log_message "Periodic check: attempting to reconnect to WiFi"
-                    stop_hotspot
-                    hotspot_active=false
-                    connection_attempts=0
-                fi
-                last_check_time=$current_time
             fi
         fi
     fi
