@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# WiFi Fallback Script v0.7 - Simplified and Reliable
-# Back to basics for stability
+# WiFi Fallback Script v0.7.1 - Using nmcli for reliability
+# Based on what worked in your web interface
 
 # Configuration
 WIFI_INTERFACE="wlan0"
@@ -18,7 +18,6 @@ BACKUP_PASSWORD=""
 FORCE_HOTSPOT=false
 
 # Files
-WPA_CONF="/etc/wpa_supplicant/wpa_supplicant.conf"
 CONFIG_FILE="/etc/wifi-fallback.conf"
 
 # Load configuration
@@ -64,14 +63,11 @@ cleanup_interface() {
 
 # Check if WiFi is connected
 is_wifi_connected() {
-    # Check if we have an IP on wlan0
-    if ip addr show "$WIFI_INTERFACE" | grep -q "inet .*scope global"; then
-        # Try to ping gateway
-        gateway=$(ip route | grep default | awk '{print $3}' | head -1)
-        if [ -n "$gateway" ]; then
-            if ping -c 1 -W 2 "$gateway" >/dev/null 2>&1; then
-                return 0
-            fi
+    # Use nmcli to check if wlan0 is connected
+    if nmcli device status 2>/dev/null | grep -q "^$WIFI_INTERFACE.*connected"; then
+        # Also verify we have an IP
+        if ip addr show "$WIFI_INTERFACE" | grep -q "inet .*scope global"; then
+            return 0
         fi
     fi
     return 1
@@ -85,7 +81,7 @@ is_hotspot_active() {
     return 1
 }
 
-# Connect to WiFi network
+# Connect to WiFi using nmcli (this is what worked from web interface)
 connect_to_wifi() {
     local ssid="$1"
     local password="$2"
@@ -104,39 +100,40 @@ connect_to_wifi() {
     # Clean interface
     cleanup_interface
     
-    # Create wpa_supplicant config
-    cat > /tmp/wpa_temp.conf <<EOF
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=GB
-
-network={
-    ssid="$ssid"
-    psk="$password"
-    key_mgmt=WPA-PSK
-    scan_ssid=1
-}
-EOF
+    # Make sure NetworkManager can manage wlan0 temporarily
+    nmcli device set wlan0 managed yes 2>/dev/null || true
+    sleep 2
     
-    # Start wpa_supplicant
-    wpa_supplicant -B -i "$WIFI_INTERFACE" -c /tmp/wpa_temp.conf
+    # Delete existing connection if exists
+    nmcli connection delete "$ssid" 2>/dev/null || true
     
-    # Wait for connection
-    sleep 10
-    
-    # Request DHCP
-    dhclient "$WIFI_INTERFACE" 2>/dev/null
-    
-    # Check connection
-    if is_wifi_connected; then
-        log_message "Successfully connected to $network_name"
-        cp /tmp/wpa_temp.conf "$WPA_CONF"
-        return 0
+    # Try to connect using nmcli (same as web interface does)
+    if [ -n "$password" ]; then
+        # WPA/WPA2 network
+        if nmcli device wifi connect "$ssid" password "$password" ifname "$WIFI_INTERFACE" 2>/dev/null; then
+            log_message "Successfully connected to $network_name via nmcli"
+            sleep 3
+            
+            # Verify connection
+            if is_wifi_connected; then
+                # After successful connection, set wlan0 as unmanaged again
+                nmcli device set wlan0 managed no 2>/dev/null || true
+                return 0
+            fi
+        fi
     else
-        log_message "Failed to connect to $network_name"
-        killall wpa_supplicant 2>/dev/null || true
-        return 1
+        # Open network
+        if nmcli device wifi connect "$ssid" ifname "$WIFI_INTERFACE" 2>/dev/null; then
+            log_message "Successfully connected to open network $network_name"
+            nmcli device set wlan0 managed no 2>/dev/null || true
+            return 0
+        fi
     fi
+    
+    log_message "Failed to connect to $network_name"
+    # Set back to unmanaged on failure
+    nmcli device set wlan0 managed no 2>/dev/null || true
+    return 1
 }
 
 # Setup NAT for internet sharing
@@ -160,6 +157,9 @@ setup_nat() {
 # Start hotspot
 start_hotspot() {
     log_message "Starting hotspot mode"
+    
+    # Make sure wlan0 is unmanaged by NetworkManager
+    nmcli device set wlan0 managed no 2>/dev/null || true
     
     # Clean interface
     cleanup_interface
@@ -223,7 +223,14 @@ stop_hotspot() {
 }
 
 # Main loop
-log_message "==== WiFi Fallback service starting v0.7 ===="
+log_message "==== WiFi Fallback service starting v0.7.1 ===="
+
+# Make sure NetworkManager is running
+if ! systemctl is-active --quiet NetworkManager; then
+    log_message "Starting NetworkManager..."
+    systemctl start NetworkManager
+    sleep 5
+fi
 
 hotspot_active=false
 wifi_connected=false
@@ -268,6 +275,12 @@ while true; do
             log_message "Force hotspot enabled but not active - starting"
             start_hotspot
             hotspot_active=true
+        else
+            # Check NAT is still working
+            if ! iptables -t nat -L POSTROUTING -n 2>/dev/null | grep -q "192.168.66.0/24"; then
+                log_message "NAT rules missing, reapplying..."
+                setup_nat
+            fi
         fi
     else
         # Normal mode - check status
