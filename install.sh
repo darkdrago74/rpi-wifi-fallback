@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# RPi WiFi Fallback Hotspot - Installer v2.6 with Fixed Installation Order
+# RPi WiFi Fallback Hotspot - Installer v0.7 Simplified
 # Author: darkdrago74
 # GitHub: https://github.com/darkdrago74/rpi-wifi-fallback
-# Version: 2.6.0 - Fixed iptables installation sequence
+# Version: 0.7.0 - Simplified with forced hotspot on first boot
 
 set -e  # Exit on any error
 
@@ -19,6 +19,8 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Logging function
@@ -42,11 +44,7 @@ info() {
 # Check Debian/Raspberry Pi OS version
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    if [[ "$VERSION_CODENAME" == "bookworm" ]] || [[ "$VERSION_CODENAME" == "bullseye" ]] || [[ "$VERSION_CODENAME" == "buster" ]]; then
-        log "✅ Detected compatible OS: $PRETTY_NAME"
-    else
-        warning "Untested OS version: $PRETTY_NAME - continuing anyway"
-    fi
+    log "✅ Detected OS: $PRETTY_NAME"
 fi
 
 # Check if running as root
@@ -54,281 +52,73 @@ if [[ $EUID -eq 0 ]]; then
    error "This script should not be run as root. Use: ./install.sh"
 fi
 
-log "Starting RPi WiFi Fallback Installation v2.6..."
+log "Starting RPi WiFi Fallback Installation v0.7..."
 log "=================================================================="
-
-
-# CRITICAL: Detect and preserve current WiFi connection
-PRESERVE_WIFI=false
-CURRENT_SSID=""
-CURRENT_PASSWORD=""
-CURRENT_IP=""
-
-# Method 1: Try to get from NetworkManager if available
-if command -v nmcli >/dev/null 2>&1 && nmcli device status | grep -q "^wlan0.*connected"; then
-    CURRENT_SSID=$(nmcli -t -f active,ssid dev wifi | grep "^yes" | cut -d: -f2)
-    CURRENT_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
-    
-    if [ -n "$CURRENT_SSID" ]; then
-        # Try to get password from NetworkManager
-        CURRENT_PASSWORD=$(sudo nmcli -s -g 802-11-wireless-security.psk connection show "$CURRENT_SSID" 2>/dev/null)
-        
-        if [ -z "$CURRENT_PASSWORD" ]; then
-            # Try to get from keyfile
-            CONNECTION_FILE=$(sudo grep -l "ssid=$CURRENT_SSID" /etc/NetworkManager/system-connections/* 2>/dev/null | head -1)
-            if [ -n "$CONNECTION_FILE" ]; then
-                CURRENT_PASSWORD=$(sudo grep "^psk=" "$CONNECTION_FILE" 2>/dev/null | cut -d= -f2)
-            fi
-        fi
-        
-        PRESERVE_WIFI=true
-    fi
-fi
-
-# Method 2: If NetworkManager didn't work, try wpa_supplicant
-if [ "$PRESERVE_WIFI" = false ] && command -v iwgetid >/dev/null 2>&1 && iwgetid wlan0 >/dev/null 2>&1; then
-    CURRENT_SSID=$(iwgetid wlan0 -r)
-    CURRENT_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
-    
-    if [ -n "$CURRENT_SSID" ] && [ -n "$CURRENT_IP" ]; then
-        # Try to extract password from wpa_supplicant
-        if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
-            # Look for the network block
-            NETWORK_BLOCK=$(sudo awk "/ssid=\"$CURRENT_SSID\"/{flag=1} flag && /^}/{print; flag=0} flag" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null)
-            if [ -n "$NETWORK_BLOCK" ]; then
-                # Extract PSK (handle both quoted and unquoted)
-                CURRENT_PASSWORD=$(echo "$NETWORK_BLOCK" | grep "psk=" | sed 's/.*psk=//; s/"//g' | head -1)
-            fi
-        fi
-        
-        PRESERVE_WIFI=true
-    fi
-fi
-
-if [ "$PRESERVE_WIFI" = true ]; then
-    warning "⚠️  Active WiFi connection detected!"
-    info "   SSID: $CURRENT_SSID"
-    info "   IP: $CURRENT_IP"
-    if [ -n "$CURRENT_PASSWORD" ]; then
-        info "   Password: [SAVED]"
-    else
-        warning "   Password: [COULD NOT BE RETRIEVED]"
-        info "   You'll need to re-enter it after installation"
-    fi
-    info "   Installation will preserve this connection"
-    
-    # Save credentials to temporary file for later use
-    sudo tee /tmp/wifi-credentials.tmp > /dev/null <<EOF
-WIFI_SSID="$CURRENT_SSID"
-WIFI_PASSWORD="$CURRENT_PASSWORD"
-EOF
-    sudo chmod 600 /tmp/wifi-credentials.tmp
-fi
-
-# Later in the script, when creating /etc/wifi-fallback.conf:
-if [ ! -f /etc/wifi-fallback.conf ]; then
-    log "Creating initial configuration..."
-    
-    # Try to load saved credentials
-    if [ -f /tmp/wifi-credentials.tmp ]; then
-        source /tmp/wifi-credentials.tmp
-        CURRENT_SSID="$WIFI_SSID"
-        CURRENT_PASSWORD="$WIFI_PASSWORD"
-        sudo rm -f /tmp/wifi-credentials.tmp
-    fi
-    
-    # If we have current WiFi, pre-populate it
-    if [ -n "$CURRENT_SSID" ]; then
-        sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
-MAIN_SSID="$CURRENT_SSID"
-MAIN_PASSWORD="$CURRENT_PASSWORD"
-BACKUP_SSID=""
-BACKUP_PASSWORD=""
-FORCE_HOTSPOT=false
-EOF
-        info "Current WiFi saved as primary network"
-        if [ -z "$CURRENT_PASSWORD" ]; then
-            warning "⚠️  Password could not be retrieved - please update via web interface"
-        fi
-    else
-        sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
-MAIN_SSID=""
-MAIN_PASSWORD=""
-BACKUP_SSID=""
-BACKUP_PASSWORD=""
-FORCE_HOTSPOT=false
-EOF
-    fi
-fi
 
 # Update system
 log "Updating system packages..."
-sudo apt update
+sudo apt update || error "Failed to update package list"
 
-# Show upgradable packages info
-UPGRADABLE=$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo "0")
-if [ "$UPGRADABLE" -gt 0 ]; then
-    info "📦 $UPGRADABLE packages can be upgraded (not required for this installation)"
-fi
-
-# FIRST: Install iptables and other essential packages
-log "Installing essential packages first..."
+# Install all packages at once
+log "Installing required packages..."
 sudo apt install -y \
+    hostapd \
+    dnsmasq \
+    lighttpd \
     iptables \
     iptables-persistent \
     netfilter-persistent \
     iw \
     wireless-tools \
-    net-tools
-
-# NOW we can use iptables commands
-log "Preparing iptables..."
-# Check if iptables is available
-if ! command -v iptables >/dev/null 2>&1; then
-    error "iptables installation failed. Please run: sudo apt install iptables"
-fi
-
-# Clear problematic rules but keep SSH
-sudo iptables -F INPUT 2>/dev/null || true
-sudo iptables -F FORWARD 2>/dev/null || true
-sudo iptables -t nat -F 2>/dev/null || true
-
-# ALWAYS ensure SSH access
-sudo iptables -I INPUT 1 -p tcp --dport 22 -j ACCEPT
-sudo iptables -P INPUT ACCEPT
-sudo iptables -P FORWARD ACCEPT
-sudo iptables -P OUTPUT ACCEPT
-
-# Install remaining packages
-log "Installing remaining packages..."
-sudo apt install -y \
-    hostapd \
-    dnsmasq \
-    lighttpd \
+    net-tools \
     git \
     curl \
-    wget
+    wget || error "Failed to install packages"
 
 # Configure services
+log "Configuring services..."
 sudo systemctl enable netfilter-persistent 2>/dev/null || true
 sudo systemctl start netfilter-persistent 2>/dev/null || true
 
 # Enable IP forwarding
 log "Enabling IP forwarding..."
-sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
 if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
     echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf
 fi
 sudo sysctl -p
 
-# Handle NetworkManager CAREFULLY
-if [ "$PRESERVE_WIFI" = true ]; then
-    log "Configuring NetworkManager (preserving WiFi)..."
-    
-    if command -v NetworkManager >/dev/null 2>&1 && systemctl is-enabled --quiet NetworkManager 2>/dev/null; then
-        warning "NetworkManager detected - will be configured AFTER reboot"
-        warning "This prevents losing your current WiFi connection"
-        
-        # Create the config but don't apply it yet
-        sudo mkdir -p /etc/NetworkManager/conf.d/
-        cat <<'EOF' | sudo tee /etc/NetworkManager/conf.d/99-unmanaged-devices.conf.pending >/dev/null
-[keyfile]
-# Let wifi-fallback manage wlan0
-unmanaged-devices=interface-name:wlan0
-EOF
-        
-        # Create activation script for after reboot
-        sudo tee /usr/local/bin/wifi-fallback-activate > /dev/null <<'EOF'
-#!/bin/bash
-# Activate wifi-fallback NetworkManager config after reboot
-if [ -f /etc/NetworkManager/conf.d/99-unmanaged-devices.conf.pending ]; then
-    mv /etc/NetworkManager/conf.d/99-unmanaged-devices.conf.pending \
-       /etc/NetworkManager/conf.d/99-unmanaged-devices.conf
-    nmcli general reload 2>/dev/null || true
-    nmcli device set wlan0 managed no 2>/dev/null || true
-    systemctl disable wifi-fallback-activate.service
-    rm -f /etc/systemd/system/wifi-fallback-activate.service
-    rm -f /usr/local/bin/wifi-fallback-activate
-fi
-EOF
-        sudo chmod +x /usr/local/bin/wifi-fallback-activate
-        
-        # Create one-time service to run after reboot
-        sudo tee /etc/systemd/system/wifi-fallback-activate.service > /dev/null <<'EOF'
-[Unit]
-Description=Activate WiFi Fallback NetworkManager Config
-After=NetworkManager.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/wifi-fallback-activate
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        sudo systemctl enable wifi-fallback-activate.service
-        
-        info "NetworkManager will be configured after reboot"
-    fi
-else
-    # No active WiFi, safe to configure now
-    log "Configuring NetworkManager (no active WiFi)..."
-    
-    if command -v NetworkManager >/dev/null 2>&1 && systemctl is-enabled --quiet NetworkManager 2>/dev/null; then
-        sudo mkdir -p /etc/NetworkManager/conf.d/
-        cat <<'EOF' | sudo tee /etc/NetworkManager/conf.d/99-unmanaged-devices.conf >/dev/null
-[keyfile]
-unmanaged-devices=interface-name:wlan0
-EOF
-        
-        if command -v nmcli >/dev/null 2>&1; then
-            sudo timeout 5 nmcli general reload 2>/dev/null || true
-            sudo timeout 5 nmcli device set wlan0 managed no 2>/dev/null || true
-        fi
-    fi
-fi
-
-# Handle dhcpcd
-if systemctl is-enabled --quiet dhcpcd 2>/dev/null; then
-    log "Configuring dhcpcd..."
-    
-    if [ "$PRESERVE_WIFI" = true ]; then
-        warning "dhcpcd config will be updated after reboot"
-        # Create pending config
-        if [ -f /etc/dhcpcd.conf ]; then
-            sudo cp /etc/dhcpcd.conf /etc/dhcpcd.conf.pending
-            echo "# Added by wifi-fallback installer" | sudo tee -a /etc/dhcpcd.conf.pending
-            echo "denyinterfaces wlan0" | sudo tee -a /etc/dhcpcd.conf.pending
-        fi
-    else
-        if ! grep -q "denyinterfaces wlan0" /etc/dhcpcd.conf 2>/dev/null; then
-            echo "# Added by wifi-fallback installer" | sudo tee -a /etc/dhcpcd.conf
-            echo "denyinterfaces wlan0" | sudo tee -a /etc/dhcpcd.conf
-        fi
-    fi
-fi
-
-# Stop services but NOT if WiFi is active
-log "Configuring services..."
-if [ "$PRESERVE_WIFI" = false ]; then
-    sudo systemctl stop hostapd 2>/dev/null || true
-    sudo systemctl stop dnsmasq 2>/dev/null || true
-    sudo killall dhclient 2>/dev/null || true
-    sudo pkill -f "dhclient.*wlan0" 2>/dev/null || true
-else
-    warning "Skipping network service stops to preserve WiFi"
-fi
-
+# Stop and disable conflicting services
+log "Stopping conflicting services..."
+sudo systemctl stop hostapd 2>/dev/null || true
+sudo systemctl stop dnsmasq 2>/dev/null || true
 sudo systemctl disable hostapd 2>/dev/null || true
 sudo systemctl disable dnsmasq 2>/dev/null || true
+
+# Handle NetworkManager if present
+if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+    log "Configuring NetworkManager to ignore wlan0..."
+    sudo mkdir -p /etc/NetworkManager/conf.d/
+    cat <<'EOF' | sudo tee /etc/NetworkManager/conf.d/99-unmanaged-devices.conf >/dev/null
+[keyfile]
+unmanaged-devices=interface-name:wlan0
+EOF
+    sudo systemctl reload NetworkManager 2>/dev/null || true
+fi
+
+# Handle dhcpcd if present
+if systemctl is-enabled --quiet dhcpcd 2>/dev/null; then
+    log "Configuring dhcpcd to ignore wlan0..."
+    if ! grep -q "denyinterfaces wlan0" /etc/dhcpcd.conf 2>/dev/null; then
+        echo "# Added by wifi-fallback installer" | sudo tee -a /etc/dhcpcd.conf
+        echo "denyinterfaces wlan0" | sudo tee -a /etc/dhcpcd.conf
+    fi
+fi
 
 # Create directories
 log "Creating directories..."
 sudo mkdir -p /usr/local/bin
 sudo mkdir -p /var/log
 sudo mkdir -p /usr/lib/cgi-bin
-sudo mkdir -p /etc/iptables
 
 # Install scripts
 log "Installing WiFi fallback script..."
@@ -388,30 +178,35 @@ wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 EOF
 
-# Configure iptables (now that it's installed)
-log "Configuring iptables rules..."
+# Configure iptables
+log "Configuring firewall rules..."
+sudo iptables -F 2>/dev/null || true
+sudo iptables -t nat -F 2>/dev/null || true
+sudo iptables -P INPUT ACCEPT
+sudo iptables -P FORWARD ACCEPT
+sudo iptables -P OUTPUT ACCEPT
+
+# Add essential rules
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
 sudo iptables -t nat -A POSTROUTING -s 192.168.66.0/24 ! -d 192.168.66.0/24 -j MASQUERADE
 sudo iptables -A FORWARD -i wlan0 -j ACCEPT
 sudo iptables -A FORWARD -o wlan0 -j ACCEPT
 sudo iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
-sudo iptables -A INPUT -i lo -j ACCEPT
-sudo iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
-sudo iptables -A INPUT -p udp --dport 67:68 -j ACCEPT
-sudo iptables -A INPUT -p udp --dport 53 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 53 -j ACCEPT
 
-# Save iptables rules
-log "Saving iptables rules..."
-sudo netfilter-persistent save
+# Save rules
+sudo netfilter-persistent save 2>/dev/null || true
 
 # Install web interface
 log "Installing web interface..."
-[ -f web/index.html ] && sudo cp web/index.html /var/www/html/
-[ -f web/wifi-config.cgi ] && sudo cp web/wifi-config.cgi /usr/lib/cgi-bin/
-[ -f /usr/lib/cgi-bin/wifi-config.cgi ] && sudo chmod +x /usr/lib/cgi-bin/wifi-config.cgi
-[ -f /usr/lib/cgi-bin/wifi-config.cgi ] && sudo chown www-data:www-data /usr/lib/cgi-bin/wifi-config.cgi
+if [ -f web/index.html ]; then
+    sudo cp web/index.html /var/www/html/
+fi
+
+if [ -f web/wifi-config.cgi ]; then
+    sudo cp web/wifi-config.cgi /usr/lib/cgi-bin/
+    sudo chmod +x /usr/lib/cgi-bin/wifi-config.cgi
+    sudo chown www-data:www-data /usr/lib/cgi-bin/wifi-config.cgi
+fi
 
 # Configure sudo for www-data
 if ! sudo grep -q "www-data.*wifi-fallback" /etc/sudoers; then
@@ -419,8 +214,10 @@ if ! sudo grep -q "www-data.*wifi-fallback" /etc/sudoers; then
 fi
 
 # Install control scripts
-[ -f scripts/hotspot-control.sh ] && sudo cp scripts/hotspot-control.sh /usr/local/bin/hotspot-control
-[ -f /usr/local/bin/hotspot-control ] && sudo chmod +x /usr/local/bin/hotspot-control
+if [ -f scripts/hotspot-control.sh ]; then
+    sudo cp scripts/hotspot-control.sh /usr/local/bin/hotspot-control
+    sudo chmod +x /usr/local/bin/hotspot-control
+fi
 
 # Create hotspot command
 sudo tee /usr/local/bin/hotspot > /dev/null <<'EOF'
@@ -434,35 +231,6 @@ case "$1" in
 esac
 EOF
 sudo chmod +x /usr/local/bin/hotspot
-
-# Create netdiag tool
-log "Installing diagnostic tools..."
-sudo tee /usr/local/bin/netdiag > /dev/null <<'EOF'
-#!/bin/bash
-echo "=== Network Diagnostics ==="
-echo "Date: $(date)"
-echo ""
-echo "--- Interface Status ---"
-ip -br addr show
-echo ""
-echo "--- WiFi Status ---"
-if command -v iwgetid >/dev/null 2>&1; then
-    iwgetid wlan0 2>/dev/null || echo "WiFi not connected"
-fi
-echo ""
-echo "--- Default Routes ---"
-ip route | grep default
-echo ""
-echo "--- iptables NAT rules ---"
-sudo iptables -t nat -L POSTROUTING -n -v 2>/dev/null | head -5 || echo "iptables not configured"
-echo ""
-echo "--- Services ---"
-echo -n "wifi-fallback: "; systemctl is-active wifi-fallback 2>/dev/null || echo "inactive"
-echo -n "NetworkManager: "; systemctl is-active NetworkManager 2>/dev/null || echo "inactive"
-echo -n "hostapd: "; systemctl is-active hostapd 2>/dev/null || echo "inactive"
-echo -n "dnsmasq: "; systemctl is-active dnsmasq 2>/dev/null || echo "inactive"
-EOF
-sudo chmod +x /usr/local/bin/netdiag
 
 # Configure lighttpd
 log "Configuring web server..."
@@ -479,88 +247,60 @@ log "Enabling services..."
 sudo systemctl daemon-reload
 sudo systemctl enable lighttpd 2>/dev/null || true
 sudo systemctl enable wifi-fallback.service 2>/dev/null || true
+sudo systemctl restart lighttpd 2>/dev/null || true
 
-# Create initial config
-if [ ! -f /etc/wifi-fallback.conf ]; then
-    log "Creating initial configuration..."
-    
-    # Try to load saved credentials
-    if [ -f /tmp/wifi-credentials.tmp ]; then
-        source /tmp/wifi-credentials.tmp
-        CURRENT_SSID="$WIFI_SSID"
-        CURRENT_PASSWORD="$WIFI_PASSWORD"
-        sudo rm -f /tmp/wifi-credentials.tmp
-    fi
-    
-    # If we have current WiFi, pre-populate it
-    if [ -n "$CURRENT_SSID" ]; then
-        
-        sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
-MAIN_SSID="$CURRENT_SSID"
-MAIN_PASSWORD="$CURRENT_PASSWORD"
-BACKUP_SSID=""
-BACKUP_PASSWORD=""
-FORCE_HOTSPOT=false
-EOF
-        info "Current WiFi saved as primary network"
-    else
-        sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
+# IMPORTANT: Create initial config with FORCE_HOTSPOT=true for first boot
+log "Creating initial configuration with forced hotspot for first boot..."
+sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
 MAIN_SSID=""
 MAIN_PASSWORD=""
 BACKUP_SSID=""
 BACKUP_PASSWORD=""
-FORCE_HOTSPOT=false
+FORCE_HOTSPOT=true
 EOF
-    fi
-fi
 
 # Create log file
 sudo touch /var/log/wifi-fallback.log
 sudo chmod 644 /var/log/wifi-fallback.log
 
-# DON'T start service if WiFi is active
-if [ "$PRESERVE_WIFI" = true ]; then
-    warning "⚠️  Service NOT started to preserve WiFi connection"
-    info "   Service will start automatically after reboot"
-    sudo systemctl restart lighttpd 2>/dev/null || true
-else
-    log "Starting WiFi fallback service..."
-    sudo systemctl restart lighttpd 2>/dev/null || true
-    sudo systemctl start wifi-fallback.service 2>/dev/null || true
-fi
+# DON'T start the service now - let it start on boot
+log "Service configured to start on boot..."
 
 HOSTNAME=$(hostname)
 
-# Run quick diagnostic
-log "Running quick diagnostic check..."
-netdiag
-
-log "=================================================================="
-log "✅ Installation completed!"
-log ""
-
-if [ "$PRESERVE_WIFI" = true ]; then
-    warning "⚠️  IMPORTANT: WiFi connection preserved!"
-    info "   Your current connection to $CURRENT_SSID is still active"
-    info "   The WiFi fallback system will activate after reboot"
-    log ""
-fi
-
-info "📡 Hotspot: ${HOSTNAME}-hotspot (password: raspberry)"
-info "🌐 Config: http://192.168.66.66:8080 (in hotspot mode)"
-log ""
-info "📋 Commands available:"
-info "• hotspot status - Check current status"
-info "• hotspot on     - Force hotspot mode"
-info "• hotspot off    - Return to WiFi"
-info "• netdiag        - Run diagnostics"
-log ""
-warning "⚠️  REBOOT REQUIRED to complete installation"
-info "   sudo reboot"
-log ""
-info "After reboot:"
-if [ "$PRESERVE_WIFI" = true ]; then
-    info "• The system will use $CURRENT_SSID as primary network"
-fi
-info "• Fallback to hotspot if WiFi fails"
-info "• Configure via web at http://192.168.66.66:8080"
+# Big warning about first boot
+echo ""
+echo ""
+echo -e "${MAGENTA}=================================================================="
+echo -e "=================================================================="
+echo ""
+echo -e "         ✅ Installation completed successfully!"
+echo ""
+echo -e "==================================================================${NC}"
+echo -e "${MAGENTA}==================================================================${NC}"
+echo ""
+echo ""
+echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗"
+echo -e "║                                                                ║"
+echo -e "║  ${YELLOW}⚠️  IMPORTANT - READ THIS BEFORE REBOOTING! ⚠️${CYAN}              ║"
+echo -e "║                                                                ║"
+echo -e "║  ${NC}After reboot, the device will ${RED}START IN HOTSPOT MODE${NC}${CYAN}         ║"
+echo -e "║                                                                ║"
+echo -e "║  ${NC}1. Connect to WiFi: ${GREEN}${HOSTNAME}-hotspot${NC}${CYAN}              ║"
+echo -e "║  ${NC}2. Password: ${GREEN}raspberry${NC}${CYAN}                                       ║"
+echo -e "║  ${NC}3. Open browser: ${GREEN}http://192.168.66.66:8080${NC}${CYAN}                  ║"
+echo -e "║  ${NC}4. Configure your WiFi networks${CYAN}                              ║"
+echo -e "║  ${NC}5. Click 'Save & Restart' to connect to WiFi${CYAN}                ║"
+echo -e "║                                                                ║"
+echo -e "╚════════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo ""
+echo -e "${RED}★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★"
+echo -e "★                                                              ★"
+echo -e "★     ${YELLOW}REBOOT NOW WITH FULL POWER CYCLE FOR BEST RESULTS${RED}      ★"
+echo -e "★                                                              ★"  
+echo -e "★     ${NC}Recommended: ${GREEN}sudo shutdown -h now${RED}                       ★"
+echo -e "★     ${NC}Then disconnect power for 5 seconds and reconnect${RED}       ★"
+echo -e "★                                                              ★"
+echo -e "★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★${NC}"
+echo ""
