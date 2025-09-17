@@ -57,27 +57,107 @@ fi
 log "Starting RPi WiFi Fallback Installation v2.6..."
 log "=================================================================="
 
+
 # CRITICAL: Detect and preserve current WiFi connection
 PRESERVE_WIFI=false
 CURRENT_SSID=""
+CURRENT_PASSWORD=""
 CURRENT_IP=""
 
-if command -v iwgetid >/dev/null 2>&1 && iwgetid wlan0 >/dev/null 2>&1; then
+# Method 1: Try to get from NetworkManager if available
+if command -v nmcli >/dev/null 2>&1 && nmcli device status | grep -q "^wlan0.*connected"; then
+    CURRENT_SSID=$(nmcli -t -f active,ssid dev wifi | grep "^yes" | cut -d: -f2)
+    CURRENT_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+    
+    if [ -n "$CURRENT_SSID" ]; then
+        # Try to get password from NetworkManager
+        CURRENT_PASSWORD=$(sudo nmcli -s -g 802-11-wireless-security.psk connection show "$CURRENT_SSID" 2>/dev/null)
+        
+        if [ -z "$CURRENT_PASSWORD" ]; then
+            # Try to get from keyfile
+            CONNECTION_FILE=$(sudo grep -l "ssid=$CURRENT_SSID" /etc/NetworkManager/system-connections/* 2>/dev/null | head -1)
+            if [ -n "$CONNECTION_FILE" ]; then
+                CURRENT_PASSWORD=$(sudo grep "^psk=" "$CONNECTION_FILE" 2>/dev/null | cut -d= -f2)
+            fi
+        fi
+        
+        PRESERVE_WIFI=true
+    fi
+fi
+
+# Method 2: If NetworkManager didn't work, try wpa_supplicant
+if [ "$PRESERVE_WIFI" = false ] && command -v iwgetid >/dev/null 2>&1 && iwgetid wlan0 >/dev/null 2>&1; then
     CURRENT_SSID=$(iwgetid wlan0 -r)
     CURRENT_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
     
     if [ -n "$CURRENT_SSID" ] && [ -n "$CURRENT_IP" ]; then
-        PRESERVE_WIFI=true
-        warning "⚠️  Active WiFi connection detected!"
-        info "   SSID: $CURRENT_SSID"
-        info "   IP: $CURRENT_IP"
-        info "   Installation will preserve this connection"
-        
-        # Save current wpa_supplicant config
+        # Try to extract password from wpa_supplicant
         if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
-            sudo cp /etc/wpa_supplicant/wpa_supplicant.conf /tmp/wpa_backup.conf
-            info "   WiFi config backed up to /tmp/wpa_backup.conf"
+            # Look for the network block
+            NETWORK_BLOCK=$(sudo awk "/ssid=\"$CURRENT_SSID\"/{flag=1} flag && /^}/{print; flag=0} flag" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null)
+            if [ -n "$NETWORK_BLOCK" ]; then
+                # Extract PSK (handle both quoted and unquoted)
+                CURRENT_PASSWORD=$(echo "$NETWORK_BLOCK" | grep "psk=" | sed 's/.*psk=//; s/"//g' | head -1)
+            fi
         fi
+        
+        PRESERVE_WIFI=true
+    fi
+fi
+
+if [ "$PRESERVE_WIFI" = true ]; then
+    warning "⚠️  Active WiFi connection detected!"
+    info "   SSID: $CURRENT_SSID"
+    info "   IP: $CURRENT_IP"
+    if [ -n "$CURRENT_PASSWORD" ]; then
+        info "   Password: [SAVED]"
+    else
+        warning "   Password: [COULD NOT BE RETRIEVED]"
+        info "   You'll need to re-enter it after installation"
+    fi
+    info "   Installation will preserve this connection"
+    
+    # Save credentials to temporary file for later use
+    sudo tee /tmp/wifi-credentials.tmp > /dev/null <<EOF
+WIFI_SSID="$CURRENT_SSID"
+WIFI_PASSWORD="$CURRENT_PASSWORD"
+EOF
+    sudo chmod 600 /tmp/wifi-credentials.tmp
+fi
+
+# Later in the script, when creating /etc/wifi-fallback.conf:
+if [ ! -f /etc/wifi-fallback.conf ]; then
+    log "Creating initial configuration..."
+    
+    # Try to load saved credentials
+    if [ -f /tmp/wifi-credentials.tmp ]; then
+        source /tmp/wifi-credentials.tmp
+        CURRENT_SSID="$WIFI_SSID"
+        CURRENT_PASSWORD="$WIFI_PASSWORD"
+        sudo rm -f /tmp/wifi-credentials.tmp
+    fi
+    
+    # If we have current WiFi, pre-populate it
+    if [ -n "$CURRENT_SSID" ]; then
+        sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
+MAIN_SSID="$CURRENT_SSID"
+MAIN_PASSWORD="$CURRENT_PASSWORD"
+BACKUP_SSID=""
+BACKUP_PASSWORD=""
+FORCE_HOTSPOT=false
+EOF
+        info "Current WiFi saved as primary network"
+        if [ -z "$CURRENT_PASSWORD" ]; then
+            warning "⚠️  Password could not be retrieved - please update via web interface"
+        fi
+    else
+        sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
+MAIN_SSID=""
+MAIN_PASSWORD=""
+BACKUP_SSID=""
+BACKUP_PASSWORD=""
+FORCE_HOTSPOT=false
+EOF
     fi
 fi
 
@@ -404,17 +484,20 @@ sudo systemctl enable wifi-fallback.service 2>/dev/null || true
 if [ ! -f /etc/wifi-fallback.conf ]; then
     log "Creating initial configuration..."
     
+    # Try to load saved credentials
+    if [ -f /tmp/wifi-credentials.tmp ]; then
+        source /tmp/wifi-credentials.tmp
+        CURRENT_SSID="$WIFI_SSID"
+        CURRENT_PASSWORD="$WIFI_PASSWORD"
+        sudo rm -f /tmp/wifi-credentials.tmp
+    fi
+    
     # If we have current WiFi, pre-populate it
-    if [ "$PRESERVE_WIFI" = true ] && [ -n "$CURRENT_SSID" ]; then
-        # Try to extract password from wpa_supplicant
-        CURRENT_PSK=""
-        if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
-            CURRENT_PSK=$(sudo grep -A3 "ssid=\"$CURRENT_SSID\"" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null | grep "psk=" | cut -d'"' -f2 | head -1)
-        fi
+    if [ -n "$CURRENT_SSID" ]; then
         
         sudo tee /etc/wifi-fallback.conf > /dev/null <<EOF
 MAIN_SSID="$CURRENT_SSID"
-MAIN_PASSWORD="$CURRENT_PSK"
+MAIN_PASSWORD="$CURRENT_PASSWORD"
 BACKUP_SSID=""
 BACKUP_PASSWORD=""
 FORCE_HOTSPOT=false
