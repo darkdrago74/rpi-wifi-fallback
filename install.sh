@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# RPi WiFi Fallback Hotspot - Installer v0.7.1 Fixed
+# RPi WiFi Fallback Hotspot - Installer v0.7.2 Final Fix
 # Author: darkdrago74
 # GitHub: https://github.com/darkdrago74/rpi-wifi-fallback
-# Version: 0.7.1 - Fixed NetworkManager hang, using nmcli for WiFi
+# Version: 0.7.2 - Completely bypass NetworkManager reload during install
 
 set -e  # Exit on any error
 
@@ -52,7 +52,7 @@ if [[ $EUID -eq 0 ]]; then
    error "This script should not be run as root. Use: ./install.sh"
 fi
 
-log "Starting RPi WiFi Fallback Installation v0.7.1..."
+log "Starting RPi WiFi Fallback Installation v0.7.2..."
 log "=================================================================="
 
 # Update system
@@ -94,9 +94,9 @@ sudo systemctl stop dnsmasq 2>/dev/null || true
 sudo systemctl disable hostapd 2>/dev/null || true
 sudo systemctl disable dnsmasq 2>/dev/null || true
 
-# Handle NetworkManager if present - FIX: Don't reload/restart during installation
+# Handle NetworkManager - DON'T RELOAD, just configure for next boot
 if command -v NetworkManager >/dev/null 2>&1 && systemctl is-enabled --quiet NetworkManager 2>/dev/null; then
-    log "NetworkManager detected - configuring to ignore wlan0..."
+    log "NetworkManager detected - configuring for next boot..."
     sudo mkdir -p /etc/NetworkManager/conf.d/
     
     # Write the config file
@@ -105,17 +105,8 @@ if command -v NetworkManager >/dev/null 2>&1 && systemctl is-enabled --quiet Net
 unmanaged-devices=interface-name:wlan0
 EOF
     
-    # Try to reload with timeout, but don't fail if it hangs
-    log "Applying NetworkManager configuration..."
-    if command -v nmcli >/dev/null 2>&1; then
-        # Use timeout to prevent hanging
-        sudo timeout 5 nmcli general reload 2>/dev/null || true
-        sudo timeout 5 nmcli device set wlan0 managed no 2>/dev/null || true
-    else
-        log "nmcli not available - configuration will apply after reboot"
-    fi
-    
-    log "NetworkManager configured"
+    log "NetworkManager configured (will apply after reboot)"
+    # DON'T try to reload or use nmcli - it hangs!
 else
     log "NetworkManager not active - skipping"
 fi
@@ -247,7 +238,26 @@ esac
 EOF
 sudo chmod +x /usr/local/bin/hotspot
 
-# Create diagnostic tool
+# Create network-reset tool (was missing!)
+log "Installing network-reset tool..."
+sudo tee /usr/local/bin/network-reset > /dev/null <<'EOF'
+#!/bin/bash
+echo "Resetting network interfaces..."
+sudo systemctl stop wifi-fallback 2>/dev/null || true
+sudo killall -9 dhclient dhcpcd wpa_supplicant hostapd dnsmasq 2>/dev/null || true
+for iface in eth0 wlan0; do
+    sudo ip addr flush dev $iface 2>/dev/null || true
+    sudo ip link set $iface down
+    sleep 1
+    sudo ip link set $iface up
+done
+sudo ip neigh flush all
+sudo systemctl start wifi-fallback
+echo "Network reset complete!"
+EOF
+sudo chmod +x /usr/local/bin/network-reset
+
+# Create netdiag tool
 log "Installing diagnostic tool..."
 sudo tee /usr/local/bin/netdiag > /dev/null <<'EOF'
 #!/bin/bash
@@ -305,39 +315,24 @@ log "Service configured to start on boot..."
 
 HOSTNAME=$(hostname)
 
-# Big warning about first boot
-echo ""
-echo ""
-echo -e "${MAGENTA}=================================================================="
-echo -e "=================================================================="
-echo ""
-echo -e "         ✅ Installation completed successfully!"
-echo ""
-echo -e "==================================================================${NC}"
-echo -e "${MAGENTA}==================================================================${NC}"
+log "=================================================================="
+log "✅ Installation completed successfully!"
+log "=================================================================="
+
+# Big clear instructions
 echo ""
 echo ""
 echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗"
 echo -e "║                                                                ║"
-echo -e "║  ${YELLOW}⚠️  IMPORTANT - READ THIS BEFORE REBOOTING! ⚠️${CYAN}              ║"
+echo -e "║  ${YELLOW}⚠️  IMPORTANT - FIRST BOOT INSTRUCTIONS ⚠️${CYAN}                  ║"
 echo -e "║                                                                ║"
-echo -e "║  ${NC}After reboot, the device will ${RED}START IN HOTSPOT MODE${NC}${CYAN}         ║"
+echo -e "║  ${NC}After reboot, device starts in ${RED}HOTSPOT MODE${NC}${CYAN}                 ║"
 echo -e "║                                                                ║"
-echo -e "║  ${NC}1. Connect to WiFi: ${GREEN}${HOSTNAME}-hotspot${NC}${CYAN}              ║"
-echo -e "║  ${NC}2. Password: ${GREEN}raspberry${NC}${CYAN}                                       ║"
-echo -e "║  ${NC}3. Open browser: ${GREEN}http://192.168.66.66:8080${NC}${CYAN}                  ║"
-echo -e "║  ${NC}4. Configure your WiFi networks${CYAN}                              ║"
-echo -e "║  ${NC}5. Click 'Save & Restart' to connect to WiFi${CYAN}                ║"
+echo -e "║  ${GREEN}1. WiFi Network: ${HOSTNAME}-hotspot${CYAN}                  ║"
+echo -e "║  ${GREEN}2. Password: raspberry${CYAN}                                        ║"
+echo -e "║  ${GREEN}3. Configure at: http://192.168.66.66:8080${CYAN}                   ║"
 echo -e "║                                                                ║"
 echo -e "╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo ""
-echo -e "${RED}★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★"
-echo -e "★                                                              ★"
-echo -e "★     ${YELLOW}REBOOT NOW WITH FULL POWER CYCLE FOR BEST RESULTS${RED}      ★"
-echo -e "★                                                              ★"  
-echo -e "★     ${NC}Recommended: ${GREEN}sudo shutdown -h now${RED}                       ★"
-echo -e "★     ${NC}Then disconnect power for 5 seconds and reconnect${RED}       ★"
-echo -e "★                                                              ★"
-echo -e "★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★${NC}"
+echo -e "${RED}★ REBOOT REQUIRED: ${GREEN}sudo reboot${NC}"
 echo ""
