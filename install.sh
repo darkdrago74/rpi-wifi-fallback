@@ -200,8 +200,10 @@ fi
 
 # Create hostapd configuration
 log "Creating hostapd configuration..."
+HOSTNAME=$(hostname)
 if [ -f config/hostapd.conf ]; then
-    sudo cp config/hostapd.conf /etc/hostapd/hostapd.conf
+    # Replace the template variable with actual hostname
+    sed "s/\$(hostname)/$HOSTNAME/g" config/hostapd.conf | sudo tee /etc/hostapd/hostapd.conf > /dev/null
 else
     HOSTNAME=$(hostname)
     sudo tee /etc/hostapd/hostapd.conf > /dev/null <<EOF
