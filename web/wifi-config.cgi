@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# CGI script for WiFi configuration
-# Fixed version with proper file writing
+# CGI script for WiFi configuration - FIXED VERSION
+# Properly handles POST data parsing and file permissions
 
 # Function to send response
 send_response() {
@@ -15,6 +15,14 @@ send_response() {
 urldecode() {
     local url_encoded="${1//+/ }"
     printf '%b' "${url_encoded//%/\\x}"
+}
+
+# Function to parse URL parameters
+parse_param() {
+    local param_name="$1"
+    local data="$2"
+    # Extract value for the parameter, handling both middle and end positions
+    echo "$data" | sed -n "s/.*${param_name}=\([^&]*\).*/\1/p"
 }
 
 # Handle GET requests
@@ -38,16 +46,16 @@ fi
 if [ "$REQUEST_METHOD" = "POST" ]; then
     read POST_DATA
     
-    # Debug log
+    # Debug log the raw POST data
     echo "$(date): [WEB-CONFIG] Received POST data: $POST_DATA" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     
-    # Parse POST data - handle empty values properly
-    ACTION=$(echo "$POST_DATA" | grep -o 'action=[^&]*' | cut -d'=' -f2)
-    MAIN_SSID=$(echo "$POST_DATA" | grep -o 'main_ssid=[^&]*' | cut -d'=' -f2 || echo "")
-    MAIN_PASSWORD=$(echo "$POST_DATA" | grep -o 'main_password=[^&]*' | cut -d'=' -f2 || echo "")
-    BACKUP_SSID=$(echo "$POST_DATA" | grep -o 'backup_ssid=[^&]*' | cut -d'=' -f2 || echo "")
-    BACKUP_PASSWORD=$(echo "$POST_DATA" | grep -o 'backup_password=[^&]*' | cut -d'=' -f2 || echo "")
-    FORCE_HOTSPOT=$(echo "$POST_DATA" | grep -o 'force_hotspot=[^&]*' | cut -d'=' -f2 || echo "")
+    # Parse POST data using improved method
+    ACTION=$(parse_param "action" "$POST_DATA")
+    MAIN_SSID=$(parse_param "main_ssid" "$POST_DATA")
+    MAIN_PASSWORD=$(parse_param "main_password" "$POST_DATA")
+    BACKUP_SSID=$(parse_param "backup_ssid" "$POST_DATA")
+    BACKUP_PASSWORD=$(parse_param "backup_password" "$POST_DATA")
+    FORCE_HOTSPOT=$(parse_param "force_hotspot" "$POST_DATA")
     
     # URL decode values
     ACTION=$(urldecode "$ACTION")
@@ -56,28 +64,40 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     BACKUP_SSID=$(urldecode "$BACKUP_SSID")
     BACKUP_PASSWORD=$(urldecode "$BACKUP_PASSWORD")
     
-    # Set force hotspot
+    # Debug log the parsed values
+    echo "$(date): [WEB-CONFIG] Parsed values:" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    echo "$(date): [WEB-CONFIG]   ACTION='$ACTION'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    echo "$(date): [WEB-CONFIG]   MAIN_SSID='$MAIN_SSID'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    echo "$(date): [WEB-CONFIG]   MAIN_PASSWORD='$MAIN_PASSWORD'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    echo "$(date): [WEB-CONFIG]   BACKUP_SSID='$BACKUP_SSID'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    echo "$(date): [WEB-CONFIG]   FORCE_HOTSPOT='$FORCE_HOTSPOT'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    
+    # Set force hotspot value
     if [ "$FORCE_HOTSPOT" = "true" ]; then
         FORCE_HOTSPOT_VAL="true"
     else
         FORCE_HOTSPOT_VAL="false"
     fi
     
-    # Create configuration file content
-    CONFIG_CONTENT="MAIN_SSID=\"$MAIN_SSID\"
-MAIN_PASSWORD=\"$MAIN_PASSWORD\"
-BACKUP_SSID=\"$BACKUP_SSID\"
-BACKUP_PASSWORD=\"$BACKUP_PASSWORD\"
-FORCE_HOTSPOT=$FORCE_HOTSPOT_VAL"
+    # Create temporary file first, then move it
+    TEMP_CONFIG="/tmp/wifi-fallback.conf.tmp"
     
-    # Save configuration using sudo with proper escaping
-    echo "$CONFIG_CONTENT" | sudo tee /etc/wifi-fallback.conf > /dev/null
+    # Write configuration to temporary file
+    cat > "$TEMP_CONFIG" <<EOF
+MAIN_SSID="$MAIN_SSID"
+MAIN_PASSWORD="$MAIN_PASSWORD"
+BACKUP_SSID="$BACKUP_SSID"
+BACKUP_PASSWORD="$BACKUP_PASSWORD"
+FORCE_HOTSPOT=$FORCE_HOTSPOT_VAL
+EOF
     
-    # Verify the file was written
+    # Copy temp file to final location with sudo
+    sudo cp "$TEMP_CONFIG" /etc/wifi-fallback.conf
+    rm -f "$TEMP_CONFIG"
+    
+    # Verify the file was written correctly
     if [ -f /etc/wifi-fallback.conf ]; then
         echo "$(date): [WEB-CONFIG] Configuration saved successfully" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
-        
-        # Log the actual saved content for debugging
         echo "$(date): [WEB-CONFIG] Saved configuration:" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
         cat /etc/wifi-fallback.conf | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     else
