@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # CGI script for WiFi configuration
-# Handles both GET and POST requests
+# Fixed version with proper file writing
 
 # Function to send response
 send_response() {
@@ -28,6 +28,9 @@ if [ "$REQUEST_METHOD" = "GET" ]; then
             send_response "text/plain" ""
         fi
         exit 0
+    elif [ "$QUERY_ACTION" = "gethostname" ]; then
+        send_response "text/plain" "$(hostname)"
+        exit 0
     fi
 fi
 
@@ -35,13 +38,16 @@ fi
 if [ "$REQUEST_METHOD" = "POST" ]; then
     read POST_DATA
     
-    # Parse POST data
+    # Debug log
+    echo "$(date): [WEB-CONFIG] Received POST data: $POST_DATA" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    
+    # Parse POST data - handle empty values properly
     ACTION=$(echo "$POST_DATA" | grep -o 'action=[^&]*' | cut -d'=' -f2)
-    MAIN_SSID=$(echo "$POST_DATA" | grep -o 'main_ssid=[^&]*' | cut -d'=' -f2)
-    MAIN_PASSWORD=$(echo "$POST_DATA" | grep -o 'main_password=[^&]*' | cut -d'=' -f2)
-    BACKUP_SSID=$(echo "$POST_DATA" | grep -o 'backup_ssid=[^&]*' | cut -d'=' -f2)
-    BACKUP_PASSWORD=$(echo "$POST_DATA" | grep -o 'backup_password=[^&]*' | cut -d'=' -f2)
-    FORCE_HOTSPOT=$(echo "$POST_DATA" | grep -o 'force_hotspot=[^&]*' | cut -d'=' -f2)
+    MAIN_SSID=$(echo "$POST_DATA" | grep -o 'main_ssid=[^&]*' | cut -d'=' -f2 || echo "")
+    MAIN_PASSWORD=$(echo "$POST_DATA" | grep -o 'main_password=[^&]*' | cut -d'=' -f2 || echo "")
+    BACKUP_SSID=$(echo "$POST_DATA" | grep -o 'backup_ssid=[^&]*' | cut -d'=' -f2 || echo "")
+    BACKUP_PASSWORD=$(echo "$POST_DATA" | grep -o 'backup_password=[^&]*' | cut -d'=' -f2 || echo "")
+    FORCE_HOTSPOT=$(echo "$POST_DATA" | grep -o 'force_hotspot=[^&]*' | cut -d'=' -f2 || echo "")
     
     # URL decode values
     ACTION=$(urldecode "$ACTION")
@@ -57,22 +63,28 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         FORCE_HOTSPOT_VAL="false"
     fi
     
-    # Save configuration
-    {
-        echo "MAIN_SSID=\"$MAIN_SSID\""
-        echo "MAIN_PASSWORD=\"$MAIN_PASSWORD\""
-        echo "BACKUP_SSID=\"$BACKUP_SSID\""
-        echo "BACKUP_PASSWORD=\"$BACKUP_PASSWORD\""
-        echo "FORCE_HOTSPOT=$FORCE_HOTSPOT_VAL"
-    } | sudo tee /etc/wifi-fallback.conf > /dev/null
+    # Create configuration file content
+    CONFIG_CONTENT="MAIN_SSID=\"$MAIN_SSID\"
+MAIN_PASSWORD=\"$MAIN_PASSWORD\"
+BACKUP_SSID=\"$BACKUP_SSID\"
+BACKUP_PASSWORD=\"$BACKUP_PASSWORD\"
+FORCE_HOTSPOT=$FORCE_HOTSPOT_VAL"
     
-    # Log the change
-    echo "$(date): [WEB-CONFIG] Configuration updated via web interface" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
-    echo "$(date): [WEB-CONFIG]   Primary: $MAIN_SSID" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
-    echo "$(date): [WEB-CONFIG]   Backup: $BACKUP_SSID" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
-    echo "$(date): [WEB-CONFIG]   Force Hotspot: $FORCE_HOTSPOT_VAL" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    # Save configuration using sudo with proper escaping
+    echo "$CONFIG_CONTENT" | sudo tee /etc/wifi-fallback.conf > /dev/null
     
-    # Generate response
+    # Verify the file was written
+    if [ -f /etc/wifi-fallback.conf ]; then
+        echo "$(date): [WEB-CONFIG] Configuration saved successfully" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+        
+        # Log the actual saved content for debugging
+        echo "$(date): [WEB-CONFIG] Saved configuration:" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+        cat /etc/wifi-fallback.conf | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    else
+        echo "$(date): [WEB-CONFIG] ERROR: Failed to save configuration" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    fi
+    
+    # Generate response HTML
     RESPONSE='<!DOCTYPE html>
 <html>
 <head>
@@ -174,15 +186,15 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
             <div class='spinner'></div>
         </div>
         <p>If WiFi connection succeeds, you'll lose connection to this hotspot.</p>
-        <p>Page will refresh in 15 seconds...</p>
-        <script>setTimeout(function(){ window.location.href='/'; }, 15000);</script>"
+        <p>Page will refresh in 20 seconds...</p>
+        <script>setTimeout(function(){ window.location.href='/'; }, 20000);</script>"
         
-        # Restart service in background
-        (sleep 2; sudo systemctl restart wifi-fallback.service) &
+        # Restart service in background with delay
+        (sleep 3; sudo systemctl restart wifi-fallback.service) &
     else
         RESPONSE="$RESPONSE
         <div class='info'>
-            Settings saved. Changes will apply within 30 seconds.
+            Settings saved. The service will check for changes within 30 seconds.
         </div>"
     fi
     
