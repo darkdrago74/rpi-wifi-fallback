@@ -12,11 +12,10 @@
         }
         
         body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            margin: 0; 
-            padding: 20px; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            padding: 20px;
         }
         
         .container { 
@@ -31,8 +30,18 @@
         h1 { 
             color: #333; 
             text-align: center; 
-            margin-bottom: 30px;
+            margin-bottom: 10px;
             font-size: 28px;
+        }
+        
+        .hostname-display {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 6px;
         }
         
         .network-section {
@@ -44,8 +53,7 @@
         }
         
         .network-section h3 {
-            margin-top: 0;
-            margin-bottom: 15px;
+            margin: 0 0 15px 0;
             color: #007bff;
             font-size: 18px;
         }
@@ -59,8 +67,7 @@
         }
         
         .force-section h3 {
-            margin-top: 0;
-            margin-bottom: 15px;
+            margin: 0 0 15px 0;
             color: #856404;
             font-size: 18px;
         }
@@ -72,21 +79,15 @@
         }
         
         .checkbox-container input[type="checkbox"] {
-            width: auto;
+            width: 20px;
+            height: 20px;
             margin-right: 10px;
-            transform: scale(1.2);
             cursor: pointer;
         }
         
         .checkbox-container label {
-            margin-bottom: 0;
             cursor: pointer;
             user-select: none;
-        }
-        
-        .input-group {
-            margin-bottom: 15px;
-            position: relative;
         }
         
         input[type="text"], input[type="password"] { 
@@ -96,13 +97,16 @@
             border: 1px solid #ddd;
             border-radius: 6px;
             font-size: 14px;
-            transition: border-color 0.3s;
         }
         
-        input[type="text"]:focus, input[type="password"]:focus {
+        input:focus {
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+        }
+        
+        .password-wrapper {
+            position: relative;
         }
         
         .password-toggle {
@@ -110,7 +114,6 @@
             right: 10px;
             top: 50%;
             transform: translateY(-50%);
-            margin-top: 4px;
             background: #007bff;
             color: white;
             border: none;
@@ -118,7 +121,6 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 12px;
-            transition: background 0.3s;
         }
         
         .password-toggle:hover {
@@ -164,20 +166,6 @@
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
         
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            border-radius: 6px;
-            color: #155724;
-            display: none;
-        }
-        
-        .status.show {
-            display: block;
-        }
-        
         .info {
             margin-top: 20px;
             padding: 15px;
@@ -186,21 +174,6 @@
             font-size: 14px;
             color: #004085;
             border: 1px solid #bee5eb;
-        }
-        
-        .info h4 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #004085;
-        }
-        
-        .info ul {
-            margin: 10px 0;
-            padding-left: 20px;
-        }
-        
-        .info li {
-            margin: 5px 0;
         }
         
         label {
@@ -231,28 +204,10 @@
             font-size: 13px;
         }
         
-        .hostname-display {
-            text-align: center;
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 20px;
-            padding: 10px;
-            background: #f0f0f0;
-            border-radius: 6px;
-        }
-        
         @media (max-width: 600px) {
-            .container {
-                padding: 20px;
-            }
-            
-            h1 {
-                font-size: 24px;
-            }
-            
-            .button-group {
-                flex-direction: column;
-            }
+            .container { padding: 20px; }
+            h1 { font-size: 24px; }
+            .button-group { flex-direction: column; }
         }
     </style>
 </head>
@@ -271,57 +226,47 @@
                     <label for="force_hotspot">Keep hotspot active (disable WiFi connections)</label>
                 </div>
                 <div class="warning">
-                    <strong>Warning:</strong> When enabled, the device will ONLY run in hotspot mode and will not attempt to connect to any WiFi networks until this is unchecked.
+                    <strong>Warning:</strong> When enabled, device stays in hotspot mode regardless of WiFi availability
                 </div>
             </div>
             
             <div class="network-section">
                 <h3>Primary Network</h3>
-                <div class="input-group">
-                    <label for="main_ssid">Network Name (SSID):</label>
-                    <input type="text" id="main_ssid" name="main_ssid" placeholder="Your main WiFi network">
-                </div>
+                <label for="main_ssid">Network Name (SSID):</label>
+                <input type="text" id="main_ssid" name="main_ssid" placeholder="Enter your WiFi network name">
                 
-                <div class="input-group">
-                    <label for="main_password">Password:</label>
-                    <div style="position: relative;">
-                        <input type="password" id="main_password" name="main_password" placeholder="Main network password">
-                        <button type="button" class="password-toggle" onclick="togglePassword('main_password')">Show</button>
-                    </div>
+                <label for="main_password">Password:</label>
+                <div class="password-wrapper">
+                    <input type="password" id="main_password" name="main_password" placeholder="Enter WiFi password">
+                    <button type="button" class="password-toggle" onclick="togglePassword('main_password')">Show</button>
                 </div>
                 <div id="main_current" class="current-config" style="display: none;"></div>
             </div>
             
             <div class="network-section">
                 <h3>Backup Network (Optional)</h3>
-                <div class="input-group">
-                    <label for="backup_ssid">Network Name (SSID):</label>
-                    <input type="text" id="backup_ssid" name="backup_ssid" placeholder="Your backup WiFi network">
-                </div>
+                <label for="backup_ssid">Network Name (SSID):</label>
+                <input type="text" id="backup_ssid" name="backup_ssid" placeholder="Optional backup network">
                 
-                <div class="input-group">
-                    <label for="backup_password">Password:</label>
-                    <div style="position: relative;">
-                        <input type="password" id="backup_password" name="backup_password" placeholder="Backup network password">
-                        <button type="button" class="password-toggle" onclick="togglePassword('backup_password')">Show</button>
-                    </div>
+                <label for="backup_password">Password:</label>
+                <div class="password-wrapper">
+                    <input type="password" id="backup_password" name="backup_password" placeholder="Backup network password">
+                    <button type="button" class="password-toggle" onclick="togglePassword('backup_password')">Show</button>
                 </div>
                 <div id="backup_current" class="current-config" style="display: none;"></div>
             </div>
             
             <div class="button-group">
                 <button type="submit" class="btn-save" name="action" value="save">Save Configuration</button>
-                <button type="submit" class="btn-restart" name="action" value="restart">Save & Restart</button>
+                <button type="submit" class="btn-restart" name="action" value="restart">Save & Connect Now</button>
             </div>
         </form>
         
-        <div id="status" class="status"></div>
-        
         <div class="info">
-            <h4>ℹ️ How it works:</h4>
-            <ul>
+            <strong>ℹ️ How it works:</strong>
+            <ul style="margin: 10px 0; padding-left: 20px;">
                 <li><strong>Save Configuration:</strong> Saves settings (applies within 30 seconds)</li>
-                <li><strong>Save & Restart:</strong> Immediate restart with new settings</li>
+                <li><strong>Save & Connect Now:</strong> Immediate restart with new settings</li>
                 <li><strong>Force Hotspot:</strong> Keeps hotspot active for manual access</li>
                 <li>Connection order: Primary → Backup → Hotspot (automatic fallback)</li>
             </ul>
@@ -342,69 +287,58 @@
         };
         
         function updateHostname() {
-            // Get hostname from the page title or URL
-            fetch('/cgi-bin/wifi-config.cgi?action=gethostname')
-                .then(response => response.text())
-                .then(data => {
-                    // If we can't get hostname, use default
-                    const hostname = data.trim() || window.location.hostname.split('.')[0] || 'raspberry';
-                    document.getElementById('hostname').textContent = hostname;
-                    document.getElementById('hotspot_ssid').textContent = hostname + '-hotspot';
-                })
-                .catch(() => {
-                    // Fallback to hostname from URL
-                    const hostname = window.location.hostname.split('.')[0] || 'raspberry';
-                    document.getElementById('hostname').textContent = hostname;
-                    document.getElementById('hotspot_ssid').textContent = hostname + '-hotspot';
-                });
+            // Try to get actual hostname
+            var hostname = window.location.hostname;
+            if (hostname === '192.168.66.66' || hostname === 'localhost') {
+                // Fallback to a default or try to extract from somewhere else
+                hostname = 'raspberry';
+            } else {
+                hostname = hostname.split('.')[0];
+            }
+            
+            // Update display
+            document.getElementById('hostname').textContent = hostname;
+            document.getElementById('hotspot_ssid').textContent = hostname + '-hotspot';
         }
         
         function loadCurrentConfig() {
-            // Try to load current configuration
+            // Load current configuration via GET request
             fetch('/cgi-bin/wifi-config.cgi?action=getconfig')
                 .then(response => response.text())
                 .then(data => {
-                    try {
-                        // Parse the configuration (expecting key=value format)
+                    if (data) {
                         const lines = data.trim().split('\n');
-                        const config = {};
-                        
                         lines.forEach(line => {
-                            const [key, ...valueParts] = line.split('=');
-                            if (key) {
-                                let value = valueParts.join('=').replace(/^["']|["']$/g, '');
-                                config[key] = value;
+                            if (line.startsWith('MAIN_SSID=')) {
+                                const val = line.substring(10).replace(/["']/g, '');
+                                if (val) {
+                                    document.getElementById('main_ssid').value = val;
+                                    document.getElementById('main_current').style.display = 'block';
+                                    document.getElementById('main_current').innerHTML = 
+                                        '📡 Currently configured: <strong>' + val + '</strong>';
+                                }
+                            } else if (line.startsWith('MAIN_PASSWORD=')) {
+                                const val = line.substring(14).replace(/["']/g, '');
+                                if (val) {
+                                    document.getElementById('main_password').value = val;
+                                }
+                            } else if (line.startsWith('BACKUP_SSID=')) {
+                                const val = line.substring(12).replace(/["']/g, '');
+                                if (val) {
+                                    document.getElementById('backup_ssid').value = val;
+                                    document.getElementById('backup_current').style.display = 'block';
+                                    document.getElementById('backup_current').innerHTML = 
+                                        '📡 Currently configured: <strong>' + val + '</strong>';
+                                }
+                            } else if (line.startsWith('BACKUP_PASSWORD=')) {
+                                const val = line.substring(16).replace(/["']/g, '');
+                                if (val) {
+                                    document.getElementById('backup_password').value = val;
+                                }
+                            } else if (line.includes('FORCE_HOTSPOT=true')) {
+                                document.getElementById('force_hotspot').checked = true;
                             }
                         });
-                        
-                        // Update form fields with current values
-                        if (config.MAIN_SSID) {
-                            document.getElementById('main_ssid').value = config.MAIN_SSID;
-                            document.getElementById('main_password').value = config.MAIN_PASSWORD || '';
-                            
-                            if (config.MAIN_SSID) {
-                                document.getElementById('main_current').style.display = 'block';
-                                document.getElementById('main_current').innerHTML = 
-                                    '📡 Currently configured: <strong>' + config.MAIN_SSID + '</strong>';
-                            }
-                        }
-                        
-                        if (config.BACKUP_SSID) {
-                            document.getElementById('backup_ssid').value = config.BACKUP_SSID;
-                            document.getElementById('backup_password').value = config.BACKUP_PASSWORD || '';
-                            
-                            if (config.BACKUP_SSID) {
-                                document.getElementById('backup_current').style.display = 'block';
-                                document.getElementById('backup_current').innerHTML = 
-                                    '📡 Currently configured: <strong>' + config.BACKUP_SSID + '</strong>';
-                            }
-                        }
-                        
-                        if (config.FORCE_HOTSPOT === 'true') {
-                            document.getElementById('force_hotspot').checked = true;
-                        }
-                    } catch (e) {
-                        console.error('Error parsing config:', e);
                     }
                 })
                 .catch(error => {
@@ -425,28 +359,13 @@
             }
         }
         
-        // Make SSID required only if force hotspot is not checked
-        const forceCheckbox = document.getElementById('force_hotspot');
-        const mainSsid = document.getElementById('main_ssid');
-        
-        function updateRequirements() {
-            if (forceCheckbox.checked) {
-                mainSsid.removeAttribute('required');
-                mainSsid.style.borderColor = '#ddd';
-            } else {
-                // Only require if no value already exists
-                if (!mainSsid.value) {
-                    mainSsid.setAttribute('required', 'required');
-                }
-            }
-        }
-        
-        forceCheckbox.addEventListener('change', updateRequirements);
-        updateRequirements();
-        
-        // Add form validation
+        // Form validation
         document.getElementById('configForm').addEventListener('submit', function(e) {
-            if (!forceCheckbox.checked && !mainSsid.value && !document.getElementById('backup_ssid').value) {
+            const forceCheckbox = document.getElementById('force_hotspot');
+            const mainSsid = document.getElementById('main_ssid');
+            const backupSsid = document.getElementById('backup_ssid');
+            
+            if (!forceCheckbox.checked && !mainSsid.value && !backupSsid.value) {
                 e.preventDefault();
                 alert('Please configure at least one WiFi network or enable Force Hotspot Mode');
                 return false;
