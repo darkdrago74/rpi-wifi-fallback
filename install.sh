@@ -200,10 +200,13 @@ fi
 
 # Create hostapd configuration
 log "Creating hostapd configuration..."
+HOSTNAME=$(hostname)
 if [ -f config/hostapd.conf ]; then
-    sudo cp config/hostapd.conf /etc/hostapd/hostapd.conf
+    # Use sed to replace the template variable with actual hostname
+    sed "s/\$(hostname)/${HOSTNAME}/g" config/hostapd.conf | sudo tee /etc/hostapd/hostapd.conf > /dev/null
+    log "Created hostapd config with hostname: ${HOSTNAME}"
 else
-    HOSTNAME=$(hostname)
+    # Fallback if config file doesn't exist
     sudo tee /etc/hostapd/hostapd.conf > /dev/null <<EOF
 interface=wlan0
 driver=nl80211
@@ -220,6 +223,7 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 EOF
+    log "Created hostapd config from template with hostname: ${HOSTNAME}"
 fi
 
 # Install web interface
