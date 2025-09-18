@@ -299,6 +299,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable wifi-fallback.service
 sudo systemctl enable lighttpd
 
+# Remove any old sudoers entry if it exists
+sudo rm -f /etc/sudoers.d/wifi-fallback
+
+# Create proper sudoers entry for www-data
+sudo tee /etc/sudoers.d/wifi-fallback > /dev/null <<'EOF'
+# Allow www-data to manage wifi-fallback configuration
+www-data ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/wifi-fallback.conf
+www-data ALL=(ALL) NOPASSWD: /usr/bin/tee -a /var/log/wifi-fallback.log
+www-data ALL=(ALL) NOPASSWD: /bin/cp /tmp/wifi-fallback.conf.tmp /etc/wifi-fallback.conf
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart wifi-fallback.service
+www-data ALL=(ALL) NOPASSWD: /usr/bin/cat /etc/wifi-fallback.conf
+EOF
+
+# Set correct permissions
+sudo chmod 440 /etc/sudoers.d/wifi-fallback
+
 # DON'T start service now - let it start on boot
 log "Service will start automatically on next boot..."
 
