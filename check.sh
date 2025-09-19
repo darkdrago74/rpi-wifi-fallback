@@ -31,8 +31,6 @@ FILES_TO_CHECK=(
     "/usr/local/bin/wifi-fallback.sh"
     "/usr/local/bin/hotspot-control"
     "/usr/local/bin/hotspot"
-    "/usr/local/bin/netdiag"
-    "/usr/local/bin/network-reset"
     "/etc/systemd/system/wifi-fallback.service"
     "/etc/wifi-fallback.conf"
     "/var/www/html/index.html"
