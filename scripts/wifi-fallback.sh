@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# WiFi Fallback Script v1.0 - Fixed Version
-# Properly handles configuration changes and reconnection
+# WiFi Fallback Script v1.1 - With Force Disconnect
+# Handles configuration changes and forces disconnect when needed
 
 # Configuration
 WIFI_INTERFACE="wlan0"
@@ -323,7 +323,7 @@ stop_hotspot() {
 
 # Main loop
 log_info "════════════════════════════════════════════════════════"
-log_info "WiFi Fallback Service v1.0 starting..."
+log_info "WiFi Fallback Service v1.1 starting..."
 log_info "NetworkManager available: $nm_available"
 log_info "════════════════════════════════════════════════════════"
 
@@ -372,17 +372,31 @@ while true; do
                 wifi_connected=false
             fi
         else
-            # Force hotspot disabled - try to connect to WiFi
+            # Force hotspot disabled - FORCE DISCONNECT and try WiFi
             if is_hotspot_active; then
                 clients=$(get_hotspot_clients)
+                
+                # Option 1: ALWAYS force disconnect when force hotspot is disabled
+                # Uncomment the following block for immediate disconnect:
+                
+                # log_info "Force hotspot disabled - forcing disconnect of $clients clients"
+                # stop_hotspot
+                # hotspot_active=false
+                # connection_attempts=0
+                # continue  # Skip sleep, try WiFi immediately
+                
+                # Option 2: Only disconnect if no clients (current behavior)
+                # This is safer but requires manual disconnect
                 if [ "$clients" -eq 0 ]; then
-                    log_info "Force hotspot disabled and no clients - trying WiFi immediately"
+                    log_info "Force hotspot disabled and no clients - switching to WiFi"
                     stop_hotspot
                     hotspot_active=false
                     connection_attempts=0
                     continue  # Skip sleep, try immediately
                 else
-                    log_info "Force hotspot disabled but $clients clients connected - waiting"
+                    log_info "Force hotspot disabled but $clients clients connected"
+                    log_info "Waiting for clients to disconnect before switching to WiFi"
+                    # Will check again in next loop iteration
                 fi
             fi
         fi
@@ -415,6 +429,7 @@ while true; do
             # Check if we should try to reconnect
             clients=$(get_hotspot_clients)
             
+            # If force hotspot was disabled but clients still connected, check periodically
             if [ "$clients" -eq 0 ]; then
                 # No clients - we can try WiFi
                 if [ -n "$MAIN_SSID" ] || [ -n "$BACKUP_SSID" ]; then
@@ -425,7 +440,7 @@ while true; do
                     continue  # Try immediately
                 fi
             else
-                log_debug "Hotspot has $clients connected clients"
+                log_debug "Hotspot has $clients connected clients - maintaining hotspot"
             fi
         fi
         
