@@ -50,9 +50,10 @@ Configure networks and save
 
 <img src="images/webconfig2.png" width="600" alt="webconfig2">
 
-Manual Hotspot Control 
+#Manual Hotspot Control 
 Perfect for allowing coworkers to access your 3D printer or machine:
-bash# Enable manual hotspot (even when WiFi is working)
+
+# Enable manual hotspot (even when WiFi is working)
 hotspot on
 
 # Check current status
