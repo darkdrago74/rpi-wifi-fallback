@@ -53,13 +53,13 @@ Configure networks and save
 #Manual Hotspot Control 
 Perfect for allowing coworkers to access your 3D printer or machine:
 
-# Enable manual hotspot (even when WiFi is working)
+### Enable manual hotspot (even when WiFi is working)
 hotspot on
 
-# Check current status
+### Check current status
 hotspot status
 
-# Disable manual hotspot (return to WiFi)
+### Disable manual hotspot (return to WiFi)
 hotspot off
 
 
