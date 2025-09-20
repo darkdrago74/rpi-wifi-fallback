@@ -44,11 +44,13 @@ Once installed and rpi rebooted,
 Wait for hotspot to appear.
 Connect to hotspot: [hostname]-hotspot (password: raspberry)
 Open web interface: http://192.168.66.66:8080
-Configure networks and save
+Configure networks and *SAVE & CONNECT*
 
 <img src="images/webconfig1.png" width="600" alt="webconfig1">
 
 <img src="images/webconfig2.png" width="600" alt="webconfig2">
+
+<img src="images/force reconnect2.png" width="600" alt="forcing2">
 
 #Manual Hotspot Control 
 Perfect for allowing coworkers to access your 3D printer or machine:
