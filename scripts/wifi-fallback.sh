@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# WiFi Fallback Script v1.1 - With Force Disconnect
-# Handles configuration changes and forces disconnect when needed
+# WiFi Fallback Script v1.2 - Smart Reconnect
+# Handles both button behaviors and periodic WiFi checking
 
 # Configuration
 WIFI_INTERFACE="wlan0"
@@ -10,6 +10,7 @@ HOTSPOT_PASSWORD="raspberry"
 HOTSPOT_IP="192.168.66.66"
 CHECK_INTERVAL=30
 MAX_RETRIES=4
+WIFI_CHECK_INTERVAL=300  # Check for WiFi availability every 5 minutes when in hotspot mode
 CONFIG_FILE="/etc/wifi-fallback.conf"
 LOG_FILE="/var/log/wifi-fallback.log"
 
@@ -18,10 +19,11 @@ hotspot_active=false
 wifi_connected=false
 last_force_state=""
 connection_attempts=0
-last_check_time=0
+last_wifi_check_time=0
 nm_available=false
 last_main_ssid=""
 last_backup_ssid=""
+pending_wifi_switch=false
 
 # Check if NetworkManager is available and running
 if command -v nmcli >/dev/null 2>&1 && systemctl is-active --quiet NetworkManager; then
@@ -50,6 +52,29 @@ get_hotspot_clients() {
     else
         echo "0"
     fi
+}
+
+# Check if WiFi network is available (scanning)
+wifi_network_available() {
+    local ssid="$1"
+    [ -z "$ssid" ] && return 1
+    
+    log_debug "Scanning for WiFi network: $ssid"
+    if [ "$nm_available" = true ]; then
+        # Use nmcli to scan
+        nmcli device wifi rescan 2>/dev/null || true
+        sleep 2
+        if nmcli device wifi list | grep -q "$ssid"; then
+            log_debug "Network $ssid found in scan"
+            return 0
+        fi
+    else
+        # Use iwlist to scan
+        sudo iwlist "$WIFI_INTERFACE" scan 2>/dev/null | grep -q "ESSID:\"$ssid\"" && return 0
+    fi
+    
+    log_debug "Network $ssid not found in scan"
+    return 1
 }
 
 # Check if WiFi is connected
@@ -323,7 +348,7 @@ stop_hotspot() {
 
 # Main loop
 log_info "════════════════════════════════════════════════════════"
-log_info "WiFi Fallback Service v1.1 starting..."
+log_info "WiFi Fallback Service v1.2 starting..."
 log_info "NetworkManager available: $nm_available"
 log_info "════════════════════════════════════════════════════════"
 
@@ -343,9 +368,28 @@ else
 fi
 
 while true; do
+    current_time=$(date +%s)
+    
     # Reload configuration
     if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
+        
+        # Check for FORCE_DISCONNECT flag (one-time use)
+        if [ "$FORCE_DISCONNECT" = "true" ]; then
+            log_info "⚠️ Force disconnect requested by user (Save & Connect Now button)"
+            # Clear the flag immediately
+            sudo sed -i '/FORCE_DISCONNECT=/d' "$CONFIG_FILE"
+            
+            if is_hotspot_active; then
+                clients=$(get_hotspot_clients)
+                log_info "Forcing disconnect of $clients clients to switch to WiFi immediately"
+                stop_hotspot
+                hotspot_active=false
+                connection_attempts=0
+                pending_wifi_switch=false
+                continue  # Skip sleep, try WiFi immediately
+            fi
+        fi
         
         # Check if SSIDs changed
         if [ "$last_main_ssid" != "$MAIN_SSID" ] || [ "$last_backup_ssid" != "$BACKUP_SSID" ]; then
@@ -354,7 +398,7 @@ while true; do
             log_info "  Backup: $last_backup_ssid -> $BACKUP_SSID"
             last_main_ssid="$MAIN_SSID"
             last_backup_ssid="$BACKUP_SSID"
-            connection_attempts=0  # Reset attempts for new config
+            connection_attempts=0
         fi
     fi
     
@@ -370,34 +414,14 @@ while true; do
                 start_hotspot
                 hotspot_active=true
                 wifi_connected=false
+                pending_wifi_switch=false
             fi
         else
-            # Force hotspot disabled - FORCE DISCONNECT and try WiFi
+            # Force hotspot disabled
             if is_hotspot_active; then
-                clients=$(get_hotspot_clients)
-                
-                # Option 1: ALWAYS force disconnect when force hotspot is disabled
-                # Uncomment the following block for immediate disconnect:
-                
-                # log_info "Force hotspot disabled - forcing disconnect of $clients clients"
-                # stop_hotspot
-                # hotspot_active=false
-                # connection_attempts=0
-                # continue  # Skip sleep, try WiFi immediately
-                
-                # Option 2: Only disconnect if no clients (current behavior)
-                # This is safer but requires manual disconnect
-                if [ "$clients" -eq 0 ]; then
-                    log_info "Force hotspot disabled and no clients - switching to WiFi"
-                    stop_hotspot
-                    hotspot_active=false
-                    connection_attempts=0
-                    continue  # Skip sleep, try immediately
-                else
-                    log_info "Force hotspot disabled but $clients clients connected"
-                    log_info "Waiting for clients to disconnect before switching to WiFi"
-                    # Will check again in next loop iteration
-                fi
+                log_info "Force hotspot disabled - marking for WiFi switch"
+                pending_wifi_switch=true
+                # Don't disconnect immediately unless FORCE_DISCONNECT is set
             fi
         fi
     fi
@@ -408,6 +432,7 @@ while true; do
             log_warn "Force hotspot enabled but hotspot not active - starting"
             start_hotspot
             hotspot_active=true
+            pending_wifi_switch=false
         else
             # Verify NAT is working
             if ! sudo iptables -t nat -L POSTROUTING -n 2>/dev/null | grep -q "192.168.66.0/24"; then
@@ -423,24 +448,59 @@ while true; do
         if is_wifi_connected; then
             wifi_connected=true
             connection_attempts=0
+            pending_wifi_switch=false
         elif is_hotspot_active; then
             hotspot_active=true
             
-            # Check if we should try to reconnect
-            clients=$(get_hotspot_clients)
-            
-            # If force hotspot was disabled but clients still connected, check periodically
-            if [ "$clients" -eq 0 ]; then
-                # No clients - we can try WiFi
-                if [ -n "$MAIN_SSID" ] || [ -n "$BACKUP_SSID" ]; then
-                    log_info "No hotspot clients - attempting WiFi connection"
+            # Handle pending WiFi switch
+            if [ "$pending_wifi_switch" = true ]; then
+                clients=$(get_hotspot_clients)
+                
+                if [ "$clients" -eq 0 ]; then
+                    log_info "No clients connected - switching to WiFi as requested"
                     stop_hotspot
                     hotspot_active=false
                     connection_attempts=0
+                    pending_wifi_switch=false
                     continue  # Try immediately
+                else
+                    log_debug "Waiting for $clients clients to disconnect before switching (pending switch)"
                 fi
             else
-                log_debug "Hotspot has $clients connected clients - maintaining hotspot"
+                # Periodic check for WiFi availability when in hotspot mode
+                time_since_check=$((current_time - last_wifi_check_time))
+                
+                if [ $time_since_check -gt $WIFI_CHECK_INTERVAL ]; then
+                    log_info "Periodic check: scanning for configured WiFi networks..."
+                    last_wifi_check_time=$current_time
+                    
+                    # Check if main or backup network is available
+                    network_found=false
+                    
+                    if [ -n "$MAIN_SSID" ] && wifi_network_available "$MAIN_SSID"; then
+                        log_info "Primary network $MAIN_SSID is now available"
+                        network_found=true
+                    elif [ -n "$BACKUP_SSID" ] && wifi_network_available "$BACKUP_SSID"; then
+                        log_info "Backup network $BACKUP_SSID is now available"
+                        network_found=true
+                    fi
+                    
+                    if [ "$network_found" = true ]; then
+                        clients=$(get_hotspot_clients)
+                        
+                        if [ "$clients" -eq 0 ]; then
+                            log_info "WiFi network available and no clients - switching automatically"
+                            stop_hotspot
+                            hotspot_active=false
+                            connection_attempts=0
+                            continue
+                        else
+                            log_info "WiFi available but $clients clients connected - staying in hotspot"
+                        fi
+                    else
+                        log_debug "No configured WiFi networks found in scan"
+                    fi
+                fi
             fi
         fi
         
@@ -454,6 +514,7 @@ while true; do
                 if connect_to_wifi "$MAIN_SSID" "$MAIN_PASSWORD" "primary"; then
                     wifi_connected=true
                     connection_attempts=0
+                    pending_wifi_switch=false
                 fi
             # Try backup network
             elif [ -n "$BACKUP_SSID" ] && [ $connection_attempts -le $((MAX_RETRIES * 2)) ]; then
@@ -461,13 +522,14 @@ while true; do
                 if connect_to_wifi "$BACKUP_SSID" "$BACKUP_PASSWORD" "backup"; then
                     wifi_connected=true
                     connection_attempts=0
+                    pending_wifi_switch=false
                 fi
             # Fall back to hotspot
             else
                 log_info "All WiFi connection attempts failed - starting hotspot"
                 if start_hotspot; then
                     hotspot_active=true
-                    last_check_time=$(date +%s)
+                    last_wifi_check_time=$current_time
                 fi
                 connection_attempts=0
             fi
