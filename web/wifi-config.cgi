@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# CGI script for WiFi configuration - FIXED VERSION
-# Properly handles POST data parsing and file permissions
+# CGI script for WiFi configuration - Smart Disconnect Version
+# "Save Configuration" = wait for users, "Save & Connect Now" = force disconnect
 
 # Function to send response
 send_response() {
@@ -21,7 +21,6 @@ urldecode() {
 parse_param() {
     local param_name="$1"
     local data="$2"
-    # Extract value for the parameter, handling both middle and end positions
     echo "$data" | sed -n "s/.*${param_name}=\([^&]*\).*/\1/p"
 }
 
@@ -68,8 +67,6 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     echo "$(date): [WEB-CONFIG] Parsed values:" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     echo "$(date): [WEB-CONFIG]   ACTION='$ACTION'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     echo "$(date): [WEB-CONFIG]   MAIN_SSID='$MAIN_SSID'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
-    echo "$(date): [WEB-CONFIG]   MAIN_PASSWORD='$MAIN_PASSWORD'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
-    echo "$(date): [WEB-CONFIG]   BACKUP_SSID='$BACKUP_SSID'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     echo "$(date): [WEB-CONFIG]   FORCE_HOTSPOT='$FORCE_HOTSPOT'" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
     
     # Set force hotspot value
@@ -79,16 +76,25 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         FORCE_HOTSPOT_VAL="false"
     fi
     
+    # Determine if we should force disconnect based on action
+    FORCE_DISCONNECT="false"
+    if [ "$ACTION" = "restart" ] && [ "$FORCE_HOTSPOT_VAL" = "false" ]; then
+        # "Save & Connect Now" with force hotspot disabled = immediate disconnect
+        FORCE_DISCONNECT="true"
+        echo "$(date): [WEB-CONFIG] Force disconnect requested (Save & Connect Now)" | sudo tee -a /var/log/wifi-fallback.log >/dev/null
+    fi
+    
     # Create temporary file first, then move it
     TEMP_CONFIG="/tmp/wifi-fallback.conf.tmp"
     
-    # Write configuration to temporary file
+    # Write configuration to temporary file with force disconnect flag
     cat > "$TEMP_CONFIG" <<EOF
 MAIN_SSID="$MAIN_SSID"
 MAIN_PASSWORD="$MAIN_PASSWORD"
 BACKUP_SSID="$BACKUP_SSID"
 BACKUP_PASSWORD="$BACKUP_PASSWORD"
 FORCE_HOTSPOT=$FORCE_HOTSPOT_VAL
+FORCE_DISCONNECT=$FORCE_DISCONNECT
 EOF
     
     # Copy temp file to final location with sudo
@@ -105,6 +111,7 @@ EOF
     fi
     
     # Generate response HTML
+    HOSTNAME=$(hostname)
     RESPONSE='<!DOCTYPE html>
 <html>
 <head>
@@ -199,22 +206,32 @@ EOF
     fi
     
     if [ "$ACTION" = "restart" ]; then
+        if [ "$FORCE_DISCONNECT" = "true" ]; then
+            RESPONSE="$RESPONSE
+            <div class='warning'>
+                <strong>⚠️ Forcing Disconnect!</strong><br>
+                All users will be disconnected from the hotspot.<br>
+                The device will immediately attempt to connect to WiFi.
+                <div class='spinner'></div>
+            </div>
+            <p>You will lose access to this page in a few seconds...</p>"
+        else
+            RESPONSE="$RESPONSE
+            <div class='info'>
+                <strong>Applying Configuration...</strong><br>
+                The service is restarting to apply changes.
+                <div class='spinner'></div>
+            </div>"
+        fi
         RESPONSE="$RESPONSE
-        <div class='info'>
-            <strong>Applying Configuration...</strong><br>
-            The service is restarting to connect to WiFi
-            <div class='spinner'></div>
-        </div>
-        <p>If WiFi connection succeeds, you'll lose connection to this hotspot.</p>
-        <p>Page will refresh in 20 seconds...</p>
         <script>setTimeout(function(){ window.location.href='/'; }, 20000);</script>"
         
-        # Restart service in background with delay
+        # Restart service in background
         (sleep 3; sudo systemctl restart wifi-fallback.service) &
     else
         RESPONSE="$RESPONSE
         <div class='info'>
-            Settings saved. The service will check for changes within 30 seconds.
+            Settings saved. The service will wait for users to disconnect before switching to WiFi.
         </div>"
     fi
     
