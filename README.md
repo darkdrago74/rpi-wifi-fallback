@@ -7,7 +7,7 @@ To uninstall the wifi fallback system, perform it with your machine's ethernet c
 
 - 🔄 **Automatic fallback** to hotspot mode when WiFi fails
 - 🌐 **Dual WiFi support** (primary + backup networks)
--   -> with ethernet cable plugged to the rpi, can provide internet on the hotspot connection
+- 🔌 **Ethernet Bridge**: When ethernet cable is plugged into the RPi, internet connectivity is shared through the hotspot connection
 - 📱 **Mobile-friendly web interface** for easy configuration
 - 🖨️ **3D Printer integration** - works perfectly with Klipper/Mainsail/Fluidd
 - 🔧 **Manual hotspot mode** - enable on-demand for coworker access
