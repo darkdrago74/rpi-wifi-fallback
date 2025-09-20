@@ -7,6 +7,7 @@ To uninstall the wifi fallback system, perform it with your machine's ethernet c
 
 - 🔄 **Automatic fallback** to hotspot mode when WiFi fails
 - 🌐 **Dual WiFi support** (primary + backup networks)
+-   -> with ethernet cable plugged to the rpi, can provide internet on the hotspot connection
 - 📱 **Mobile-friendly web interface** for easy configuration
 - 🖨️ **3D Printer integration** - works perfectly with Klipper/Mainsail/Fluidd
 - 🔧 **Manual hotspot mode** - enable on-demand for coworker access
@@ -33,18 +34,24 @@ sudo reboot
 ```bash
 curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | DEBIAN_FRONTEND=noninteractive bash
 ```
+
 <img src="images/installfinished.png" width="600" alt="Install finished">
+
 ## 🔧 Configuration
 Automatic Setup
 
-Connect via Ethernet for initial setup, or
-Wait for hotspot to appear when WiFi fails
+Once installed and rpi rebooted, 
+Wait for hotspot to appear.
 Connect to hotspot: [hostname]-hotspot (password: raspberry)
 Open web interface: http://192.168.66.66:8080
 Configure networks and save
 
-Manual Hotspot Control (New!)
-Perfect for allowing coworkers to access your 3D printer:
+<img src="images/webconfig1.png" width="600" alt="webconfig1">
+
+<img src="images/webconfig2.png" width="600" alt="webconfig2">
+
+Manual Hotspot Control 
+Perfect for allowing coworkers to access your 3D printer or machine:
 bash# Enable manual hotspot (even when WiFi is working)
 hotspot on
 
@@ -73,15 +80,16 @@ Check Installation Status
 ```
 Reset System (if having issues)
 ```bash
-bash./reset.sh  # Resets to defaults without uninstalling
+./reset.sh  # Resets to defaults without uninstalling
 ```
-Complete Uninstall
+Complete Uninstall !!!! Please perform it with the ethernet cable plugged and with an ssh connection with the ethernet connection IP
+Wifi credentials will be save and reconnect the rpi to it after reboot.
 ```bash
-bash./uninstall.sh  # Removes everything, restores original state
+./uninstall.sh  # Removes everything, restores original state
 ```
 Create Backup Before Installing
 ```bash
-bash./backup.sh    # Creates backup of original configs
+./backup.sh    # Creates backup of original configs
 ./install.sh   # Then install normally
 ```
 
@@ -101,7 +109,7 @@ OctoPrint/Mainsail - never lose access to your printer interface
 🎯 How It Works
 
 Normal Operation: Connects to primary WiFi network
-Primary Fails: Tries backup network (4 attempts each)
+Primary Fails: Tries backup network (few attempts each)
 All Fail: Automatically creates hotspot
 Manual Override: Force hotspot mode anytime with hotspot on
 Smart Recovery: Automatically reconnects when networks return
