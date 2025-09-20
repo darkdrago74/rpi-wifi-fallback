@@ -33,7 +33,7 @@ sudo reboot
 ```bash
 curl -fsSL https://raw.githubusercontent.com/darkdrago74/rpi-wifi-fallback/main/install.sh | DEBIAN_FRONTEND=noninteractive bash
 ```
-
+<img src="images/installfinished.png" width="600" alt="Install finished">
 ## 🔧 Configuration
 Automatic Setup
 
