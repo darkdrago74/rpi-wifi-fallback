@@ -215,7 +215,7 @@
     <div class="container">
         <h1>WiFi Configuration</h1>
         <div class="hostname-display">
-            Device: <strong id="hostname">raspberry</strong>
+            Device: <strong id="hostname">Loading...</strong>
         </div>
         
         <form id="configForm" action="/cgi-bin/wifi-config.cgi" method="post">
@@ -265,14 +265,14 @@
         <div class="info">
             <strong>ℹ️ How it works:</strong>
             <ul style="margin: 10px 0; padding-left: 20px;">
-                <li><strong>Save Configuration:</strong> Saves settings (applies within 30 seconds)</li>
-                <li><strong>Save & Connect Now:</strong> Immediate restart with new settings</li>
+                <li><strong>Save Configuration:</strong> Waits for users to disconnect before switching</li>
+                <li><strong>Save & Connect Now:</strong> Forces immediate disconnect and WiFi connection</li>
                 <li><strong>Force Hotspot:</strong> Keeps hotspot active for manual access</li>
                 <li>Connection order: Primary → Backup → Hotspot (automatic fallback)</li>
             </ul>
             <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #bee5eb;">
                 <strong>Hotspot Access:</strong><br>
-                SSID: <span id="hotspot_ssid">hostname-hotspot</span><br>
+                SSID: <span id="hotspot_ssid">Loading...</span><br>
                 Password: raspberry<br>
                 Config URL: http://192.168.66.66:8080
             </div>
@@ -287,18 +287,20 @@
         };
         
         function updateHostname() {
-            // Try to get actual hostname
-            var hostname = window.location.hostname;
-            if (hostname === '192.168.66.66' || hostname === 'localhost') {
-                // Fallback to a default or try to extract from somewhere else
-                hostname = 'raspberry';
-            } else {
-                hostname = hostname.split('.')[0];
-            }
-            
-            // Update display
-            document.getElementById('hostname').textContent = hostname;
-            document.getElementById('hotspot_ssid').textContent = hostname + '-hotspot';
+            // Fetch actual hostname from CGI script
+            fetch('/cgi-bin/wifi-config.cgi?action=gethostname')
+                .then(response => response.text())
+                .then(data => {
+                    const hostname = data.trim() || 'raspberry';
+                    document.getElementById('hostname').textContent = hostname;
+                    document.getElementById('hotspot_ssid').textContent = hostname + '-hotspot';
+                })
+                .catch(error => {
+                    console.error('Error fetching hostname:', error);
+                    // Fallback to default
+                    document.getElementById('hostname').textContent = 'raspberry';
+                    document.getElementById('hotspot_ssid').textContent = 'raspberry-hotspot';
+                });
         }
         
         function loadCurrentConfig() {
@@ -369,19 +371,17 @@
             const actionButton = e.submitter;
             const action = actionButton ? actionButton.value : 'save';
             
-            // Check if currently connected to hotspot and disabling force mode
+            // Check if currently connected to hotspot
             const isConnectedToHotspot = (window.location.hostname === '192.168.66.66');
-            const wasForceEnabled = forceCheckbox.getAttribute('data-original-state') === 'true';
             
-            // Warn if disabling force hotspot while connected via hotspot
-            if (isConnectedToHotspot && wasForceEnabled && !forceCheckbox.checked && action === 'restart' && (mainSsid.value || backupSsid.value)) {
-                if (!confirm('⚠️ WARNING: You are currently connected to the hotspot.\n\n' +
-                           'Disabling Force Hotspot Mode will:\n' +
-                           '• Disconnect all users from the hotspot\n' +
+            // Warn if using "Save & Connect Now" while connected via hotspot and disabling force mode
+            if (isConnectedToHotspot && !forceCheckbox.checked && action === 'restart' && (mainSsid.value || backupSsid.value)) {
+                if (!confirm('⚠️ WARNING: Save & Connect Now will:\n\n' +
+                           '• Immediately disconnect ALL users from the hotspot\n' +
                            '• Attempt to connect to the configured WiFi network\n' +
                            '• You will lose access to this configuration page\n\n' +
-                           'Make sure you have noted the device\'s network settings.\n\n' +
-                           'Continue?')) {
+                           'To wait for users to disconnect naturally, use "Save Configuration" instead.\n\n' +
+                           'Continue with forced disconnect?')) {
                     e.preventDefault();
                     return false;
                 }
