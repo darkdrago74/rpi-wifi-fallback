@@ -1,6 +1,7 @@
-# Raspberry Pi WiFi Fallback Hotspot   (NOT RELEASED YET // NOT FULLY FUNCTIONNAL)
+# Raspberry Pi WiFi Fallback Hotspot   (Working!!!)
 
 🚀 Automatic WiFi fallback system that creates a hotspot when your configured networks are unavailable. Perfect for 3D printers, IoT projects, and headless Raspberry Pi setups!
+To uninstall the wifi fallback system, perform it with your machine's ethernet cable plugged
 
 ## ✨ Features
 
