@@ -5,7 +5,7 @@
 
 # Function to send response
 send_response() {
-    echo "Content-Type: $1"
+    echo "Content-Type: $1; charset=utf-8"
     echo ""
     shift
     echo "$@"
