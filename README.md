@@ -1,4 +1,4 @@
-# Raspberry Pi WiFi Fallback Hotspot   (Working!!!)
+# Raspberry Pi WiFi Fallback Hotspot   (Working!!!  --- but not with Trixie version of Debian..... yet)
 
 🚀 Automatic WiFi fallback system that creates a hotspot when your configured networks are unavailable. Perfect for 3D printers, IoT projects, and headless Raspberry Pi setups!
 To uninstall the wifi fallback system, perform it with your machine's ethernet cable plugged
