@@ -3,7 +3,8 @@
 🚀 Automatic WiFi fallback system that creates a hotspot when your configured networks are unavailable. Perfect for 3D printers, IoT projects, and headless Raspberry Pi setups!
 To uninstall the wifi fallback system, perform it with your machine's ethernet cable plugged
 
-Also, in case klipper is installed AFTER the wifi fallback, when using KIAUH to install mainsail, some errors will get trigered if you leave the default port to 80. Instead, set it to 8000.
+Also, in case klipper is installed AFTER the wifi fallback, when using KIAUH to install mainsail, some errors will get trigered if you leave the default port to 80. This will also create problems with Octoeverywhere which will then show the main page of the rpi-wifi-fallback script, instead of mainsail/fluidd. 
+The best approach is to Install the script on a fully working machine (after Mainsail installation and Octoeverwhere)
 
 ## ✨ Features
 
