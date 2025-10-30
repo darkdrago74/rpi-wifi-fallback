@@ -37,7 +37,7 @@ case "$1" in
         echo ""
         echo "📡 Hotspot: $(hostname)-hotspot"
         echo "🔑 Password: raspberry"
-        echo "🌐 Config: http://192.168.66.66:8080"
+        echo "🌐 Config: http://192.168.66.66:8088"
         ;;
         
     off)
@@ -57,7 +57,7 @@ case "$1" in
         
         if [ -z "$MAIN_SSID" ] && [ -z "$BACKUP_SSID" ]; then
             echo "⚠️  No WiFi networks configured!"
-            echo "   Configure at: http://192.168.66.66:8080"
+            echo "   Configure at: http://192.168.66.66:8088"
         fi
         
         sudo systemctl restart wifi-fallback
