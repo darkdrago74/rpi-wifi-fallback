@@ -46,7 +46,7 @@ Automatic Setup
 Once installed and rpi rebooted, 
 Wait for hotspot to appear.
 Connect to hotspot: [hostname]-hotspot (password: raspberry)
-Open web interface: http://192.168.66.66:8080
+Open web interface: http://192.168.66.66:8088
 Configure networks and *SAVE & CONNECT*
 
 <img src="images/webconfig1.png" width="600" alt="webconfig1">
@@ -103,7 +103,7 @@ Create Backup Before Installing
 When in hotspot mode, you get dual access:
 
 🖨️ Klipper/Mainsail: http://192.168.66.66 (port 80)
-⚙️ WiFi Configuration: http://192.168.66.66:8080 (port 8080)
+⚙️ WiFi Configuration: http://192.168.66.66:8088 (port 8088)
 
 Perfect for 3D Printing Scenarios:
 
@@ -136,7 +136,7 @@ During Hotspot Mode
 Connect to: [hostname]-hotspot
 Password: raspberry
 Printer Interface: http://192.168.66.66
-WiFi Config: http://192.168.66.66:8080
+WiFi Config: http://192.168.66.66:8088
 Friendly URLs: http://printer.local, http://mainsail.local
 
 📱 Mobile Responsive
