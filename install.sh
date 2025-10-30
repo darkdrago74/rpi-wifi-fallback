@@ -331,7 +331,7 @@ echo -e "${CYAN}║                                                             
 echo -e "${CYAN}║  ${GREEN}After reboot, connect to:${CYAN}                                   ║${NC}"
 echo -e "${CYAN}║  ${WHITE}SSID: ${HOSTNAME}-hotspot${CYAN}                           ║${NC}"
 echo -e "${CYAN}║  ${WHITE}Password: raspberry${CYAN}                                         ║${NC}"
-echo -e "${CYAN}║  ${WHITE}Config: http://192.168.66.66:8080${CYAN}                          ║${NC}"
+echo -e "${CYAN}║  ${WHITE}Config: http://192.168.66.66:8088${CYAN}                          ║${NC}"
 echo -e "${CYAN}║                                                                ║${NC}"
 echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
