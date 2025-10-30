@@ -299,7 +299,7 @@ start_hotspot() {
     
     sudo ip addr add "$HOTSPOT_IP/24" dev "$WIFI_INTERFACE" 2>/dev/null || true
     
-    sudo sed -i "s/server.port.*=.*/server.port = 8080/" /etc/lighttpd/lighttpd.conf
+    sudo sed -i "s/server.port.*=.*/server.port = 8088/" /etc/lighttpd/lighttpd.conf
     sudo systemctl restart lighttpd
     
     log_info "Starting hostapd..."
@@ -325,7 +325,7 @@ start_hotspot() {
     
     log_info "✅ Hotspot started successfully"
     log_info "SSID: $HOTSPOT_SSID | Password: $HOTSPOT_PASSWORD"
-    log_info "Config URL: http://$HOTSPOT_IP:8080"
+    log_info "Config URL: http://$HOTSPOT_IP:8088"
     return 0
 }
 
