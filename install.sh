@@ -113,11 +113,21 @@ sudo netfilter-persistent save 2>/dev/null || true
 
 # Enable IP forwarding
 log "Enabling IP forwarding..."
-sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
-if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
-    echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf
+echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-wifi-fallback.conf > /dev/null
+if [ $? -eq 0 ]; then
+    log "Successfully created /etc/sysctl.d/99-wifi-fallback.conf"
+else
+    error "Failed to create /etc/sysctl.d/99-wifi-fallback.conf"
 fi
-sudo sysctl -p
+sudo sysctl -p /etc/sysctl.d/99-wifi-fallback.conf
+if [ $? -eq 0 ]; then
+    log "Successfully applied IP forwarding settings."
+else
+    # Fallback for systems that might need it, or for logging
+    if ! sysctl net.ipv4.ip_forward | grep -q "1"; then
+        warning "sysctl -p failed to apply settings. Check system logs."
+    fi
+fi
 
 # Configure NetworkManager if present (DON'T RELOAD DURING INSTALL)
 if command -v nmcli >/dev/null 2>&1 && systemctl is-enabled --quiet NetworkManager 2>/dev/null; then
