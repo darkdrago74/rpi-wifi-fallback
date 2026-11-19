@@ -284,6 +284,12 @@ sudo chmod +x /usr/local/bin/hotspot
 # Configure lighttpd
 log "Configuring web server..."
 sudo lighty-enable-mod cgi 2>/dev/null || true
+# Web config UI lives on a FIXED port 8088: port 80 is owned by the printer UI
+# (nginx/Mainsail) and lighttpd cannot bind it ("Address already in use").
+sudo sed -i 's/^server\.port.*/server.port = 8088/' /etc/lighttpd/lighttpd.conf
+if ! grep -q '^server\.port.*8088' /etc/lighttpd/lighttpd.conf; then
+    echo 'server.port = 8088' | sudo tee -a /etc/lighttpd/lighttpd.conf > /dev/null
+fi
 sudo systemctl restart lighttpd
 
 # Unmask hostapd
