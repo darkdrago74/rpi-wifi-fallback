@@ -1,6 +1,16 @@
 #!/bin/bash
 
-# WiFi Fallback Script v1.3 - Smart Reconnect
+# WiFi Fallback Script v1.4 - Smart Reconnect + self-healing dependencies/webserver
+# v1.4 (adds to v1.3 fixes):
+#  - ensure_dependencies(): installs any missing package (hostapd, dnsmasq, lighttpd,
+#    lighttpd-mod-cgi, iptables, iw, ...) via apt - no manual install needed
+#  - ensure_webserver(): installs lighttpd if missing, pins server.port to WEB_PORT
+#    (8088 - port 80 belongs to the printer UI), enables+starts it, restores the web
+#    files from /usr/local/share/wifi-fallback if missing, and VERIFIES with an HTTP
+#    curl that the config page actually answers; repairs and re-verifies if not
+#  - ensure_configs(): recreates /etc/hostapd/hostapd.conf, /etc/dnsmasq.conf and
+#    /etc/wifi-fallback.conf with sane defaults if missing (adaptable to fresh machines)
+#  - selfcheck(): logs a one-line health summary at startup and every loop
 # Fixes (2026-11-17, debugged on voron02rpi):
 #  - FORCE_DISCONNECT is now truly one-shot (variable was persisting in memory after the
 #    sed removed it from the file -> re-triggered every loop)
@@ -59,6 +69,148 @@ log_info() { log_message "INFO" "$@"; }
 log_warn() { log_message "WARN" "$@"; }
 log_error() { log_message "ERROR" "$@"; }
 log_debug() { log_message "DEBUG" "$@"; }
+
+# --- Self-healing: dependencies, configs, web server --------------------------
+REQUIRED_PKGS=(hostapd dnsmasq lighttpd lighttpd-mod-cgi iptables-persistent netfilter-persistent iw wireless-tools net-tools curl wpasupplicant)
+SHARE_DIR="/usr/local/share/wifi-fallback"   # backup copies of web files made by install.sh
+
+ensure_dependencies() {
+    local missing=()
+    local pkg
+    for pkg in "${REQUIRED_PKGS[@]}"; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+        log_warn "Missing packages: ${missing[*]} - installing via apt..."
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq 2>/dev/null || true
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"; then
+            log_info "Installed: ${missing[*]}"
+        else
+            log_error "Failed to install: ${missing[*]}"
+        fi
+    fi
+}
+
+ensure_configs() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_warn "$CONFIG_FILE missing - creating default (hotspot on first boot)"
+        sudo tee "$CONFIG_FILE" > /dev/null <<EOF
+MAIN_SSID=""
+MAIN_PASSWORD=""
+BACKUP_SSID=""
+BACKUP_PASSWORD=""
+FORCE_HOTSPOT=true
+EOF
+        sudo chmod 600 "$CONFIG_FILE"
+    fi
+    if [ ! -f /etc/hostapd/hostapd.conf ] || ! grep -q '^interface=' /etc/hostapd/hostapd.conf; then
+        log_warn "hostapd.conf missing/invalid - writing default"
+        sudo tee /etc/hostapd/hostapd.conf > /dev/null <<EOF
+interface=$WIFI_INTERFACE
+driver=nl80211
+ssid=$HOTSPOT_SSID
+hw_mode=g
+channel=7
+wmm_enabled=0
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=$HOTSPOT_PASSWORD
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+EOF
+    fi
+    if [ ! -f /etc/dnsmasq.conf ] || ! grep -q '192.168.66.66' /etc/dnsmasq.conf; then
+        log_warn "dnsmasq.conf missing/invalid - writing default"
+        sudo tee /etc/dnsmasq.conf > /dev/null <<EOF
+interface=$WIFI_INTERFACE
+bind-interfaces
+listen-address=$HOTSPOT_IP
+dhcp-range=192.168.66.10,192.168.66.50,255.255.255.0,24h
+dhcp-option=3,$HOTSPOT_IP
+dhcp-option=6,8.8.8.8,8.8.4.4
+server=8.8.8.8
+server=8.8.4.4
+no-resolv
+except-interface=eth0
+except-interface=lo
+cache-size=150
+no-negcache
+EOF
+    fi
+}
+
+ensure_webserver() {
+    # 1. lighttpd installed?
+    if ! command -v lighttpd >/dev/null 2>&1; then
+        log_warn "lighttpd not installed - installing..."
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq 2>/dev/null || true
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lighttpd lighttpd-mod-cgi \
+            || { log_error "cannot install lighttpd"; return 1; }
+    fi
+    # 2. correct fixed port? (port 80 belongs to the printer UI - nginx/Mainsail)
+    if [ -f /etc/lighttpd/lighttpd.conf ] && ! grep -q "^server\.port *= *$WEB_PORT" /etc/lighttpd/lighttpd.conf; then
+        log_info "Fixing lighttpd port -> $WEB_PORT"
+        sudo sed -i "s/^server\.port.*/server.port = $WEB_PORT/" /etc/lighttpd/lighttpd.conf
+        grep -q "^server\.port *= *$WEB_PORT" /etc/lighttpd/lighttpd.conf || \
+            echo "server.port = $WEB_PORT" | sudo tee -a /etc/lighttpd/lighttpd.conf > /dev/null
+    fi
+    # 3. CGI module + enable
+    if command -v lighty-enable-mod >/dev/null 2>&1; then
+        sudo lighty-enable-mod cgi >/dev/null 2>&1 || true
+    fi
+    sudo systemctl enable lighttpd >/dev/null 2>&1 || true
+    # 4. web files present? restore from backup copy if not
+    if [ -f "$SHARE_DIR/index.html" ] && [ ! -f /var/www/html/index.html ]; then
+        log_warn "web root index.html missing - restoring from $SHARE_DIR"
+        sudo cp "$SHARE_DIR/index.html" /var/www/html/
+    fi
+    if [ -f "$SHARE_DIR/wifi-config.cgi" ] && [ ! -f /usr/lib/cgi-bin/wifi-config.cgi ]; then
+        log_warn "wifi-config.cgi missing - restoring from $SHARE_DIR"
+        sudo cp "$SHARE_DIR/wifi-config.cgi" /usr/lib/cgi-bin/wifi-config.cgi
+        sudo chmod +x /usr/lib/cgi-bin/wifi-config.cgi
+        sudo chown www-data:www-data /usr/lib/cgi-bin/wifi-config.cgi 2>/dev/null || true
+    fi
+    # 5. running? then VERIFY it answers HTTP on WEB_PORT; repair if not
+    if ! systemctl is-active --quiet lighttpd; then
+        log_info "lighttpd not active - starting..."
+        sudo systemctl restart lighttpd 2>/dev/null || sudo systemctl start lighttpd
+        sleep 2
+    fi
+    if ! curl -s -o /dev/null --connect-timeout 3 "http://127.0.0.1:$WEB_PORT/"; then
+        log_warn "lighttpd not answering on port $WEB_PORT - restarting and re-verifying"
+        sudo systemctl restart lighttpd
+        sleep 2
+        if curl -s -o /dev/null --connect-timeout 3 "http://127.0.0.1:$WEB_PORT/"; then
+            log_info "lighttpd verified OK on port $WEB_PORT"
+        else
+            log_error "lighttpd STILL not answering on port $WEB_PORT (check /var/log/lighttpd/error.log)"
+        fi
+    fi
+}
+
+selfcheck() {
+    local pkgs_ok=yes
+    local pkg
+    for pkg in "${REQUIRED_PKGS[@]}"; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || pkgs_ok=no
+    done
+    local web_ok=no
+    if systemctl is-active --quiet lighttpd && curl -s -o /dev/null --connect-timeout 3 "http://127.0.0.1:$WEB_PORT/"; then
+        web_ok=yes
+    fi
+    local conf_ok=no;  [ -f "$CONFIG_FILE" ] && conf_ok=yes
+    local hostapd_ok=no; [ -f /etc/hostapd/hostapd.conf ] && hostapd_ok=yes
+    local dnsmasq_ok=no; [ -f /etc/dnsmasq.conf ] && dnsmasq_ok=yes
+    local mode="transitioning"
+    if [ "$FORCE_HOTSPOT" = "true" ]; then mode="forced-hotspot"
+    elif is_wifi_connected; then mode="wifi"
+    elif is_hotspot_active; then mode="hotspot"
+    fi
+    log_info "SELFCHECK: packages=$pkgs_ok web=$web_ok(port $WEB_PORT) conf=$conf_ok hostapd_conf=$hostapd_ok dnsmasq_conf=$dnsmasq_ok mode=$mode"
+}
 
 # Get hotspot client count
 get_hotspot_clients() {
@@ -367,8 +519,12 @@ stop_hotspot() {
 
 # Main loop
 log_info "════════════════════════════════════════════════════════"
-log_info "WiFi Fallback Service v1.3 starting..."
+log_info "WiFi Fallback Service v1.4 starting..."
 log_info "════════════════════════════════════════════════════════"
+
+# Self-healing bootstrap: make sure we can run even on a fresh/partial install
+ensure_dependencies
+ensure_configs
 
 # Load initial configuration
 if [ -f "$CONFIG_FILE" ]; then
@@ -384,9 +540,18 @@ else
 fi
 last_force_state="$FORCE_HOTSPOT"
 
+# Web server health: install/fix/verify lighttpd once at startup, then keep watching
+ensure_webserver
+selfcheck
+
 while true; do
     current_time=$(date +%s)
     nm_check   # re-evaluate every loop (boot race fix)
+
+    # Self-heal every loop (cheap when healthy: no apt unless something is missing,
+    # no restart unless lighttpd is down or not answering)
+    ensure_dependencies
+    ensure_webserver
 
     # Reload configuration
     if [ -f "$CONFIG_FILE" ]; then

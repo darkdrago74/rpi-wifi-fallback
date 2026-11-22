@@ -80,4 +80,19 @@ script uses only the broken wpa path for its whole lifetime.
   reloads + rescans + waits for wlan0 to leave "unmanaged", 64-hex PMK written unquoted,
   hotspot->wifi auto-switch is a single attempt with immediate hotspot restore on failure.
 - `config/wifi-fallback.service`: After/Wants NetworkManager + wait-online (boot race).
-- `install.sh`: lighttpd pinned to 8088 at install time.
+- `install.sh`: lighttpd pinned to 8088 at install time; web files also backed up to
+  `/usr/local/share/wifi-fallback/`.
+
+## v1.4 - autonomous / self-healing (2026-11-21, requested by Romain)
+The running script no longer assumes a perfect one-time install:
+- `ensure_dependencies()` - dpkg-checks all required packages every loop and
+  `apt-get install`s any that are missing (hostapd, dnsmasq, lighttpd, lighttpd-mod-cgi,
+  iptables-persistent, netfilter-persistent, iw, wireless-tools, net-tools, curl, wpasupplicant).
+- `ensure_webserver()` - installs lighttpd if absent, forces `server.port = 8088`
+  (never 80: the printer UI owns it), enables the cgi module, restores the web files from
+  the backup dir if missing, starts lighttpd if down, and VERIFIES with
+  `curl http://127.0.0.1:8088/` - restarts and re-verifies if it does not answer.
+- `ensure_configs()` - recreates /etc/wifi-fallback.conf, /etc/hostapd/hostapd.conf and
+  /etc/dnsmasq.conf with sane defaults if missing (works on a fresh/partial install).
+- `selfcheck()` - one-line health summary in the log at startup.
+All of these run at service start AND every loop iteration (cheap when healthy).

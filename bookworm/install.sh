@@ -240,6 +240,10 @@ fi
 log "Installing web interface..."
 if [ -f web/index.html ]; then
     sudo cp web/index.html /var/www/html/
+    # keep a backup copy so wifi-fallback.sh can self-restore the web files if they go missing
+    sudo mkdir -p /usr/local/share/wifi-fallback
+    sudo cp web/index.html /usr/local/share/wifi-fallback/
+    [ -f web/wifi-config.cgi ] && sudo cp web/wifi-config.cgi /usr/local/share/wifi-fallback/
 else
     error "web/index.html not found!"
 fi
